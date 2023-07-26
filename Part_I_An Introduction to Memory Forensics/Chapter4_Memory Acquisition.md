@@ -264,3 +264,184 @@ Dưới đây là danh sách mô tả cách tạo crash dump. Lưu ý rằng kh�
 Các phương pháp mà chúng ta vừa mô tả đều dựa vào cùng một cơ chế bên trong kernel để tạo crash dump. Do đó, chúng đều có một số điểm yếu tương tự. Chúng thường không bao gồm các khu vực bộ nhớ của thiết bị hoặc trang vật lý đầu tiên, mà có thể chứa bản sao của Master Boot Record (MBR) từ ổ đĩa và các mật khẩu xác thực trước khởi động. Hơn nữa, chúng có thể bị chiếm đoạt bởi phần mềm độc hại đăng ký một lời gọi thông báo lỗi (xem "Malicious Callbacks" trong Chương 13) hoặc bằng cách tắt truy cập vào bộ gỡ lỗi nhân hệ thống. Một số hệ thống có thể không thể tạo crash dump hoàn chỉnh do kích thước (xem http://media.blackhat.com/bh-us-10/whitepapers/Suiche/BlackHat-USA-2010-Suiche-BlueScreen-of-the-Death-is-dead-wp.pdf). Một số công cụ thu thập bộ nhớ pháp lý như MoonSols MWMT cung cấp tùy chọn tạo tệp crash dump. Trong những trường hợp này, các công cụ này xây dựng phần tiêu đề crash dump riêng của họ và sau đó ghi các khối vật lý bộ nhớ vào tệp kết quả. Nói cách khác, chúng tạo ra một tệp crash dump tương thích với bộ gỡ lỗi WinDBG (và do đó Volatility), nhưng không sử dụng cùng một cơ chế nhân hệ thống mà các kỹ thuật khác sử dụng. Do đó, nhiều điểm bất lợi như việc thiếu trang đầu tiên, chiếm đoạt thông qua callbacks và giới hạn kích thước được tránh. Volatility và KnTDD cũng có thể chuyển đổi bản sao bộ nhớ thành tệp crash dump, như bạn sẽ tìm hiểu sau trong chương.
 
 ### Windows Hibernation File
+
+
+Tệp hibernation (hiberfil.sys) chứa một bản sao nén của bộ nhớ mà hệ thống ghi vào đĩa trong quá trình hibernation. Năm 2008, Matthieu Suiche (MoonSols) phát triển công cụ đầu tiên, Sandman, để phân tích các tệp này cho mục đích pháp lý. Bạn có thể đọc về nghiên cứu ban đầu của ông trong bài báo "Windows Hibernation File For Fun 'N' Profit" (http://sebug.net/paper/Meeting-Documents/BlackHat-USA2008/BH_US_08_Suiche_Windows_hibernation.pdf). Tệp hibernation bao gồm một tiêu đề tiêu chuẩn (PO_MEMORY_IMAGE), một tập hợp các ngữ cảnh kernel và thanh ghi như CR3 và một số mảng các khối dữ liệu nén. Định dạng nén sử dụng là Xpress cơ bản (http://msdn.microsoft.com/en-us/library/hh554002.aspx). Tuy nhiên, bắt đầu từ Windows 8 và Server 2012, Microsoft bắt đầu sử dụng thuật toán Xpress kèm theo mã hóa Huffman và LZ. Dưới đây là một ví dụ về tiêu đề của tệp hibernation:
+
+```
+>>> dt("PO_MEMORY_IMAGE")
+'PO_MEMORY_IMAGE' (168 bytes)
+0x0  : Signature                ['String', {'length': 4}]
+0x4  : Version                  ['unsigned long']
+0x8  : CheckSum                 ['unsigned long']
+0xc  : LengthSelf               ['unsigned long']
+0x10 : PageSelf                 ['unsigned long']
+0x14 : PageSize                 ['unsigned long']
+0x18 : ImageType                ['unsigned long']
+0x20 : SystemTime               ['WinTimeStamp', {}]
+[snip]
+```
+
+Thành viên Signature thường chứa các giá trị hibr, HIBR, wake hoặc WAKE. Tuy nhiên, trong một số trường hợp, toàn bộ tiêu đề PO_MEMORY_IMAGE bị xóa (xảy ra khi hệ thống tiếp tục hoạt động), điều này có thể ngăn cản việc phân tích tệp hibernation trong hầu hết các công cụ. Trong những trường hợp đó, Volatility sử dụng một thuật toán "brute force" để xác định dữ liệu cần thiết. Khi thực hiện phân tích tệp hibernation với Volatility, hãy nhớ rằng mỗi lần bạn chạy một lệnh, bạn cần giải nén các đoạn dữ liệu cụ thể. Để tiết kiệm thời gian, chúng tôi khuyến nghị bạn nén toàn bộ bản sao lưu bộ nhớ một lần (bằng cách sử dụng lệnh imagecopy, mà chúng tôi sẽ mô tả sau đây). Việc giải nén này chuyển đổi tệp hibernation thành một bản sao lưu bộ nhớ nguyên gốc mà bạn có thể phân tích mà không cần giải nén trực tiếp.
+
+Như được giải thích trong Microsoft KB 920730, để tạo một tệp hibernation, trước tiên hãy bật chế độ hibernation trong kernel (powercfg.exe /hibernate on) và sau đó thực hiện lệnh shutdown /h để hibernate. Tùy thuộc vào phiên bản hệ điều hành của bạn, bạn cũng có thể thực hiện bằng cách nhấp chuột từ menu Start (Start ➪ Hibernate hoặc Start ➪ Shutdown ➪ Hibernate). Tuy nhiên, trong hầu hết các trường hợp pháp lý, bạn sẽ nhận được một máy tính xách tay đã được hibernated hoặc bạn sẽ nhận được một hình ảnh đĩa pháp lý từ hệ thống có sẵn tệp hibernation. Trong trường hợp này, bạn sẽ phải sao chép tệp hiberfil.sys ra khỏi ổ C: bằng cách gắn ổ đĩa từ máy tính phân tích (hoặc bằng cách sử dụng đĩa CD / DVD).
+
+>**Cảnh báo:**<br> Trước khi một hệ thống hibernates, cấu hình DHCP (nếu có) sẽ được giải phóng và bất kỳ kết nối hoạt động nào cũng sẽ bị chấm dứt. Kết quả là, dữ liệu mạng trong các tệp hibernation có thể bị thiếu sót. Hơn nữa, trong thời gian này, phần mềm độc hại có thể loại bỏ chính nó khỏi bộ nhớ để bạn không thể phát hiện sự tồn tại của nó trong tệp hibernation.
+
+### Expert Witness Format (EWF)
+
+Memory được tạo bởi EnCase được lưu trữ trong định dạng Expert Witness Format (EWF). Đây là một định dạng phổ biến do sự phổ biến của EnCase trong các cuộc điều tra pháp lý. Do đó, bạn nên quen thuộc với các phương pháp sau để phân tích các bản sao bộ nhớ EWF:
+
+- **EWFAddressSpace:** Volatility bao gồm một không gian địa chỉ có thể làm việc với các tệp EWF, nhưng nó yêu cầu bạn cài đặt libewf (https://code.google.com/p/libewf). Tại thời điểm viết bài này, libewf có thể hoàn toàn hỗ trợ các tệp EWF được sử dụng bởi EnCase v6 và các phiên bản trước đó, nhưng phiên bản mới hơn là EWF2-EX01 được giới thiệu với EnCase v7 chỉ có tính thử nghiệm.
+
+- **Mounting với EnCase:** Bạn có thể mount một tệp EWF bằng EnCase và sau đó chạy Volatility trên thiết bị được hiển thị. Phương pháp này cũng hoạt động trong môi trường mạng cho phép lấy mẫu (xem Sampling RAM Across the EnCase Enterprise tại http://volatility-labs.blogspot.com/2013/10/sampling-ram-across-encase-enterprise.html). Phương pháp này cũng tránh phụ thuộc vào libewf và hỗ trợ các tệp EnCase v7.
+
+- **Mounting với FTK Imager:** Một lựa chọn khác là mount tệp EWF dưới dạng "Physical & Logical" và sau đó chạy Volatility trên phần không được cấp phát của ổ đĩa (ví dụ: E:\unallocated space nếu tệp được mount trên ổ đĩa E:).
+
+>**LƯU Ý:**<br> Mặc dù EWFAddressSpace được đi kèm với Volatility, nhưng nó không được bật mặc định (do sự phụ thuộc vào libewf). Để kích hoạt nó, sử dụng --plugins=contrib/plugins trong lệnh của bạn, như được mô tả trong Chương 3.
+
+### HPAK Format
+
+
+HPAK là một định dạng dữ liệu do HBGary thiết kế, cho phép nhúng bộ nhớ vật lý và tệp trang (page file) của một hệ thống mục tiêu vào cùng một tập tin đầu ra. Đây là một định dạng độc quyền, do đó chỉ có công cụ FastDump mới có khả năng tạo tập tin HPAK. Cụ thể, với công cụ này, bạn phải sử dụng tùy chọn dòng lệnh -hpak. Nếu không, bản sao bộ nhớ sẽ được tạo ra trong định dạng mặc định (raw), không bao gồm các tệp trang. Bạn có thể tùy chọn cung cấp tùy chọn -compress để nén dữ liệu với zlib. Tập tin kết quả sẽ có phần mở rộng .hpak.
+
+Để đáp ứng nhu cầu của một số người dùng Volatility đã nhận các tập tin HPAK để phân tích mà không ngờ đến, chúng tôi đã tạo một không gian địa chỉ để xử lý chúng. Hãy nhớ rằng, nếu bạn không thực hiện việc thu thập dữ liệu, bạn phải xử lý dữ liệu mà bạn nhận được. May mắn là định dạng tập tin HPAK tương đối đơn giản. Nó có một tiêu đề 32 byte, như được hiển thị bên dưới, trong đó bốn byte đầu tiên là HPAK (chữ ký ma thuật). Các trường còn lại hiện tại chưa biết, nhưng không quan trọng đối với việc thực hiện phân tích bộ nhớ.
+
+```
+>>> dt("HPAK_HEADER")
+'HPAK_HEADER' (32 bytes)
+0x0     : Magic                 ['String', {'length': 4}]
+```
+
+Sau tiêu đề, bạn sẽ tìm thấy một hoặc nhiều cấu trúc HPAK_SECTION có dạng như sau:
+
+```
+>>> dt("HPAK_SECTION")
+'HPAK_SECTION' (224 bytes)
+0x0  : Header           ['String', {'length': 32}]
+0x8c : Compressed       ['unsigned int']
+0x98 : Length           ['unsigned long long']
+0xa8 : Offset           ['unsigned long long']
+0xb0 : NextSection      ['unsigned long long']
+0xd4 : Name             ['String', {'length': 12}]
+```
+
+Giá trị 'Header' là một chuỗi như 'HPAKSECTHPAK_SECTION_PHYSDUMP' cho phần chứa bộ nhớ vật lý. Tương tự, nó trở thành 'HPAKSECTHPAK_SECTION_PAGEDUMP' cho phần chứa tệp trang của hệ thống mục tiêu. Các giá trị 'Offset' và 'Length' cho biết chính xác vị trí và độ dài của dữ liệu tương ứng trong tệp HPAK. Nếu 'Compressed' có giá trị khác không, điều đó có nghĩa là dữ liệu trong phần đó đã được nén bằng thuật toán zlib.
+
+Như thể hiện trong lệnh dưới đây, bạn có thể sử dụng hpakinfo để khám phá nội dung của tệp HPAK:
+
+```
+$ python vol.py -f memdump.hpak hpakinfo
+Header:     HPAKSECTHPAK_SECTION_PHYSDUMP
+Length:     0x20000000
+Offset:     0x4f8
+NextOffset: 0x200004f8
+Name:       memdump.bin
+Compressed: 0
+Header:     HPAKSECTHPAK_SECTION_PAGEDUMP
+Length:     0x30000000
+Offset:     0x200009d0
+NextOffset: 0x500009d0
+Name:       dumpfile.sys
+Compressed: 0
+```
+
+Kết quả hiển thị cho bạn biết rằng tệp HPAK này chứa bộ nhớ vật lý và một tệp trang. Phần bộ nhớ vật lý bắt đầu tại offset 0x4f8 của tệp memdump.hpak và bao gồm 0x20000000 byte (512MB). Không có phần nào được nén. Bạn có thể chạy các plugin của Volatility trực tiếp trên memdump.hpak hoặc bạn có thể trích xuất phần bộ nhớ vật lý thành một tệp riêng bằng cách sử dụng plugin hpakextract. Khi trích xuất, bạn sẽ có một bản sao bộ nhớ tổng thể (raw memory dump) tương thích với hầu hết các framework phân tích.
+
+### Virtual Machine Memory
+
+Để thu thập bộ nhớ từ một máy ảo (VM), bạn có thể chạy một trong các công cụ phần mềm đã được đề cập trước đó trong hệ điều hành (OS) của máy ảo hoặc bạn có thể thực hiện việc thu thập từ hypervisor. Phần này tập trung vào việc thu thập bộ nhớ của máy ảo từ hypervisor. Kỹ thuật này thường ít xâm phạm hơn (khi thực hiện mà không tạm dừng hoặc đình chỉ VM), vì nó khó hơn để phần mềm độc hại đang hoạt động trong VM phát hiện sự hiện diện của bạn. Cuối phần này, chúng tôi cũng sẽ thảo luận về Actaeon, cho phép bạn thực hiện phân tích bộ nhớ trực tiếp của hypervisor thực sự (tức là phân tích một hệ điều hành khách trực tiếp trong bộ nhớ của máy chủ).
+
+#### VMware
+
+Nếu bạn đang sử dụng một sản phẩm trên máy tính cá nhân như VMware Workstation, Player hoặc Fusion, bạn chỉ cần đình chỉ hoặc tạo một bản snapshot của máy ảo. Kết quả là, một bản sao của bộ nhớ của máy ảo sẽ được ghi vào một thư mục trên hệ thống tệp của máy chủ, liên quan đến cấu hình .vmx. Nếu bạn đang sử dụng VMware Server hoặc ESX, bạn có thể thực hiện điều này từ giao diện console vSphere hoặc từ dòng lệnh với lệnh vmrun có thể thực thi bằng script (xem tại https://www.vmware.com/pdf/vix160_vmrun_command.pdf). Trong môi trường đám mây, bộ nhớ dump có thể được ghi vào một kho lưu trữ mạng (SAN) hoặc hệ thống tệp NFS (Network File System).
+
+>**LƯU Ý:**<br> Hãy nhớ rằng việc tạm dừng hoặc đình chỉ một máy ảo không phải là không có hậu quả. Ví dụ, các kết nối SSL/TLS đang hoạt động không thể dễ dàng tiếp tục sau khi bị "đóng băng". Do đó, mặc dù bạn đang thực hiện việc lấy dữ liệu từ hypervisor, bạn vẫn gây ra (hạn chế) các thay đổi trong bộ nhớ của máy ảo.
+
+Tùy thuộc vào sản phẩm và phiên bản VMware cùng cách tạo bản sao bộ nhớ, bạn có thể cần phải khôi phục nhiều hơn một tệp để phân tích bộ nhớ. Trong một số trường hợp, bộ nhớ của máy ảo được chứa hoàn toàn trong một tệp .vmem (theo cấu trúc gốc). Trong các trường hợp khác, thay vì tệp .vmem, bạn có thể nhận được một tệp .vmsn (các bản snapshot) hoặc .vmss (trạng thái đã lưu), đó là các định dạng tệp độc quyền chứa bộ nhớ và siêu dữ liệu (theo cấu trúc kết hợp). May mắn thay, Nir Izraeli đã tài liệu hóa định dạng đủ để tạo một không gian địa chỉ cho Volatility (xem công việc ban đầu của ông ở đây: http://code.google.com/p/vmsnparser).
+
+Để làm tình hình phức tạp hơn một chút, Sebastian Bourne-Richard gần đây đã nhận ra rằng các sản phẩm VMware thường tạo một tệp .vmem và một trong các tệp dữ liệu siêu dữ liệu cấu trúc (theo cấu trúc phân tách). Một không gian địa chỉ hoàn toàn mới cần được viết cho Volatility để hỗ trợ cấu trúc này, vì tệp .vmem chứa các phạm vi bộ nhớ vật lý, nhưng tệp siêu dữ liệu cho biết cách ghép chúng lại để tạo thành một biểu diễn chính xác của bộ nhớ của máy ảo. Nói cách khác, khi lấy dữ liệu từ các hệ thống VMware, hãy chắc chắn khôi phục tất cả các tệp có đuôi mở rộng .vmem, .vmsn và .vmss - bởi vì không dễ biết trước tệp nào chứa bằng chứng cần thiết.
+
+Ở offset 0 của các tệp dữ liệu siêu dữ liệu, bạn sẽ tìm thấy một cấu trúc _VMWARE_HEADER như sau:
+
+```
+>>> dt("_VMWARE_HEADER")
+'_VMWARE_HEADER' (12 bytes)
+0x0 : Magic         ['unsigned int']
+0x8 : GroupCount    ['unsigned int']
+0xc : Groups        ['array', lambda x : x.GroupCount, ['_VMWARE_GROUP']]
+```
+
+Để tệp được xem là hợp lệ, có một giá trị Magic phải là 0xbed2bed0, 0xbad1bad1, 0xbed2bed2, hoặc 0xbed3bed3. Trường Groups chỉ định một mảng các cấu trúc _VMWARE_GROUP có dạng như sau:
+
+```
+>>> dt("_VMWARE_GROUP")
+'_VMWARE_GROUP' (80 bytes)
+0x0  : Name          ['String', {'length': 64, 'encoding': 'utf8'}]
+0x40 : TagsOffset    ['unsigned long long']
+```
+
+Mỗi nhóm có một tên cho phép các thành phần metadata được phân loại và một TagsOffset chỉ định vị trí bạn có thể tìm thấy một danh sách các cấu trúc _VMWARE_TAG. Một thẻ có dạng như sau: 
+
+```
+>>> dt("_VMWARE_TAG")
+'_VMWARE_TAG' (None bytes)
+0x0 : Flags      ['unsigned char']
+0x1 : NameLength ['unsigned char']
+0x2 : Name       ['String',
+ {'length': lambda x : x.NameLength, 'encoding': 'utf8'}]
+```
+
+Các cấu trúc thẻ này là chìa khóa để tìm dữ liệu bộ nhớ vật lý trong tập tin metadata. Nếu máy ảo có ít hơn 4GB RAM, một dòng bộ nhớ vật lý duy nhất được lưu trữ trong một nhóm có tên "memory" và một thẻ có tên "Memory." Đối với các hệ thống có hơn 4GB RAM, có nhiều dòng, cũng trong một nhóm có tên "memory," nhưng bao gồm các thẻ có tên "Memory," "regionPPN," "regionPageNum," và "regionSize." Không gian địa chỉ bên trong Volatility (xem volatility/plugins/addrspaces/vmware.py) phân tích các thẻ này để xây dựng lại góc nhìn về bộ nhớ vật lý.
+
+#### VirtualBox
+
+VirtualBox không tự động lưu một bản sao toàn bộ RAM xuống đĩa khi bạn tạm dừng hoặc tạm ngưng một máy ảo (như các sản phẩm ảo hóa khác làm). Thay vào đó, bạn phải tạo một bản sao bộ nhớ bằng cách sử dụng một trong các kỹ thuật sau đây:
+
+- `VBoxManage debugvm`: Dùng lệnh này để tạo một bản sao bộ nhớ core dump ELF64 nhị phân với các phần tử tùy chỉnh biểu diễn bộ nhớ vật lý của máy ảo. Thông tin chi tiết về lệnh này có thể được tìm thấy tại: http://www.virtualbox.org/manual/ch08.html#vboxmanage-debugvm.
+
+- Sử dụng tùy chọn `--dbg` khi bắt đầu máy ảo và sau đó sử dụng lệnh `.pgmphystofile`. Phương pháp này tạo ra một bản sao bộ nhớ thô (raw memory dump). Để biết thêm thông tin, xem https://www.virtualbox.org/ticket/10222.
+
+- Sử dụng VirtualBox Python API (vboxapi) để tạo tiện ích riêng để dump bộ nhớ. Người dùng cũng đính kèm một kịch bản Python có tên vboxdump.py cho ticket #10222 để cung cấp một ví dụ.
+
+Những phương pháp thứ hai và thứ ba tạo ra các bản sao bộ nhớ thô (raw memory dumps), mà Volatility hỗ trợ trực tiếp. Tuy nhiên, phương pháp đầu tiên tạo ra một ELF64 core dump, yêu cầu hỗ trợ đặc biệt. Philippe Teuwen (xem http://wiki.yobi.be/wiki/RAM_analysis) đã thực hiện nghiên cứu ban đầu về định dạng tệp này và tạo ra một địa chỉ không gian (address space) Volatility hỗ trợ chúng. Nhờ đó, Cuckoo Sandbox có thể tích hợp khả năng lưu trữ bản sao bộ nhớ từ máy ảo VirtualBox dưới định dạng ELF64 core dump.
+
+Các tệp ELF64 có một số phần tử tiêu đề chương trình tùy chỉnh. Một trong số chúng là PT_NOTE (elf64_note) với tên là VBCORE. Phần tử tiêu đề chứa một cấu trúc DBGFCOREDESCRIPTOR, như được thể hiện trong đoạn mã sau:
+
+```
+>>> dt("DBGFCOREDESCRIPTOR")
+'DBGFCOREDESCRIPTOR' (24 bytes)
+0x0  : u32Magic         ['unsigned int']
+0x4  : u32FmtVersion    ['unsigned int']
+0x8  : cbSelf           ['unsigned int']
+0xc  : u32VBoxVersion   ['unsigned int']
+0x10 : u32VBoxRevision  ['unsigned int']
+0x14 : cCpus            ['unsigned int']
+```
+
+Cấu trúc này chứa chữ ký kỹ thuật ảo của VirtualBox (0xc01ac0de), thông tin phiên bản và số lượng CPU cho hệ thống mục tiêu. Nếu bạn tiếp tục duyệt qua các phần tử tiêu đề chương trình của tệp, bạn sẽ tìm thấy các đoạn PT_LOAD khác nhau (elf64_phdr). Mỗi đoạn PT_LOAD có thành viên p_paddr là địa chỉ bộ nhớ vật lý bắt đầu. Thành viên p_offset cho bạn biết ở vị trí nào trong tệp ELF64 bạn có thể tìm thấy phần bộ nhớ vật lý. Cuối cùng, thành viên p_memsz cho bạn biết kích thước của phần bộ nhớ (theo byte).
+
+>**LƯU Ý**<br>
+Để biết thêm thông tin về định dạng dump core ELF64 của VirtualBox, hãy xem các trang web sau đây:<br>
+>- Định dạng dump core ELF64: http://www.virtualbox.org/manual/ch12.html#guestcoreformat<br>
+>- Tệp tiêu đề mã nguồn của VirtualBox: http://www.virtualbox.org/svn/vbox/trunk/include/VBox/vmm/dbgfcorefmt.h<br>
+>- Mã nguồn C tạo tệp dump core ELF64: http://www.virtualbox.org/svn/vbox/trunk/src/VBox/VMM/VMMR3/DBGFCoreWrite.cpp
+
+#### QEMU
+
+QEMU rất giống VirtualBox trong việc lưu bộ nhớ của máy ảo trong định dạng dump core ELF64. Trên thực tế, khác biệt chính duy nhất là tên PT_NOTE là CORE thay vì VBCORE. Bạn có thể tạo các dump này bằng cách sử dụng virsh, một giao diện dòng lệnh cho libvirt (http://libvirt.org/index.html). Cũng có một API Python, mà hiện tại Cuckoo Sandbox (http://www.cuckoosandbox.org/) sử dụng để tạo dump bộ nhớ của các máy ảo QEMU bị nhiễm mã độc.
+
+#### Xen/KVM
+
+Dự án LibVMI (https://github.com/bdpayne/libvmi) là một thư viện VM introspection hỗ trợ các hypervisor Xen và KVM. Nó cho phép bạn thực hiện phân tích thời gian thực của các VM đang chạy mà không thực thi bất kỳ mã nào bên trong VM. Điều này là một khả năng mạnh mẽ cho việc quét antivirus và rootkit trực tiếp, cũng như theo dõi tổng quát hệ thống. Bên cạnh đó, dự án còn bao gồm API Python (pyvmi) và một địa chỉ không gian Volatility (PyVmiAddressSpace) để phân tích bộ nhớ.
+
+#### Microsoft Hyper-V
+
+Để thu thập bộ nhớ từ các máy ảo Hyper-V, bạn cần lưu trạng thái của máy ảo hoặc tạo một bản snapshot. Sau đó, phục hồi các tệp .bin (đoạn bộ nhớ vật lý) và .vsv (metadata) từ thư mục cấu hình của máy ảo. Thật không may, Volatility hiện không hỗ trợ định dạng bộ nhớ Hyper-V, do đó bạn cần sử dụng tiện ích vm2dmp.exe (http://archive.msdn.microsoft.com/vm2dmp) để chuyển đổi các tệp .bin và .vsv thành một tệp crash dump của Windows. Sau đó, bạn có thể phân tích crash dump bằng WinDBG hoặc Volatility. Để biết thêm thông tin về quy trình này, hãy xem bài viết "Analyzing Hyper-V Saved State Files in Volatility" của Wyatt Roersma (http://www.wyattroersma.com/?p=77). Một trong những quan sát chính của Wyatt là vm2dmp.exe không hoạt động trên bất kỳ máy ảo nào có hơn 4GB RAM.
+
+>**LƯU Ý**<br>
+Bạn cũng có thể thu thập bộ nhớ từ máy ảo Hyper-V đang chạy bằng cách sử dụng Sysinternals LiveKD hoặc MoonSols LiveCloudKd (http://moonsols.com/2010/08/12/livecloudkd).
+
+### Hypervisor Memory Forensics
+
+Một trong những phát triển thú vị nhất trong pháp y VM memory là Actaeon (http://www.s3.eurecom.fr/tools/actaeon) do Mariano Graziano, Andrea Lanzi và Davide Balzarotti tạo ra. Với một bản sao lưu bộ nhớ vật lý của hệ thống chủ, công cụ này cho phép phân tích các hệ điều hành máy ảo trong môi trường ảo hóa sử dụng công nghệ Intel VT-x. Điều này bao gồm khả năng xác định các trình giả lập bộ nhớ cư trú (tích cực hoặc độc hại) và ảo hóa lồng nhau. Hiện tại, Actaeon cho phép trình giám sát máy ảo của các máy khách Windows 32-bit chạy dưới KVM, Xen, VMware Workstation, VirtualBox và HyperDbg. Actaeon được thực hiện dưới dạng một bản vá cho Volatility và đã giành giải nhất trong Cuộc thi Plugin Volatility năm 2013 (http://volatility-labs.blogspot.com/2013/08/results-are-in-for-1st-annual.html).

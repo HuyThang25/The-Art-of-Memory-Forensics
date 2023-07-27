@@ -460,4 +460,231 @@ Ngoại trừ Volatility, hầu hết các framework phân tích bộ nhớ ch�
 
 - Volatility raw2dmp: Plugin raw2dmp có thể chuyển đổi raw memory dump thành Windows crash dump để phân tích bằng trình gỡ lỗi WinDBG của Microsoft.
 
+Tùy thuộc vào các tùy chọn có sẵn, bạn nên đã sẵn sàng chuyển đổi từ hoặc sang bất kỳ định dạng tập tin nào mà bạn có thể gặp phải. Hãy nhớ rằng có thể cần thực hiện một chuyển đổi hai bước để đạt được mục tiêu cuối cùng của bạn. Ví dụ, nếu bạn nhận được một tệp hibernation và cần phân tích nó trong WinDBG (chỉ chấp nhận crash dump), thì bạn có thể chuyển đổi nó thành định dạng raw trước và sau đó từ raw thành crash dump.
 
+Dưới đây là các lệnh sử dụng các plugin Volatility imagecopy và raw2dmp. Cả hai đều sử dụng tùy chọn -O/--output-image để chỉ định đường dẫn đến tập tin đích. Để chuyển đổi một crash dump (hoặc bất kỳ định dạng nào khác) thành một bản mẫu bộ nhớ raw, hãy sử dụng lệnh sau:
+
+```
+$ python vol.py -f win7x64.dmp --profile=Win7SP0x64 imagecopy -O copy.raw
+Volatility Foundation Volatility Framework 2.4
+Writing data (5.00 MB chunks): |........[snip]........................|
+```
+
+Để chuyển đổi một mẫu bộ nhớ raw thành tệp crash dump, sử dụng lệnh sau:
+```
+$ python vol.py -f memory.raw --profile=Win8SP0x64 raw2dmp -O win8.dmp
+Volatility Foundation Volatility Framework 2.4
+Writing data (5.00 MB chunks): |........[snip]........................|
+```
+
+Thời gian chuyển đổi phụ thuộc vào kích thước của tệp mẫu bộ nhớ ban đầu. Bạn sẽ thấy một thông báo tiến trình được in ra trên terminal cho mỗi khối 5MB được ghi vào tệp kết quả.
+
+## Volatile Memory on Disk
+
+Dữ liệu tạm thời thường được ghi vào lưu trữ bền vững như một phần của hoạt động hệ thống bình thường, chẳng hạn như trong quá trình ngủ đông và trang trí. Điều quan trọng là phải nhận thức về các nguồn dữ liệu tạm thời thay thế này, vì trong một số trường hợp, đó có thể là nguồn duy nhất của bạn (ví dụ, nếu một máy tính xách tay của đối tượng đang tắt khi bị tịch thu). Trên thực tế, ngay cả khi máy tính đang hoạt động và bạn có thể lấy dữ liệu tạm thời từ hệ thống trực tiếp, bạn có thể muốn khôi phục các nguồn dữ liệu tạm thời thay thế này. Chúng có thể cung cấp chứng cứ quan trọng về những gì đã xảy ra trên hệ thống trong những khoảng thời gian khác hoặc trang bị bộ nhớ đã được trang vào lưu trữ thứ cấp, mà bạn có thể sử dụng để liên kết với hoạt động hiện tại.
+
+Kịch bản sau tập trung vào các khía cạnh kỹ thuật về cách tìm vị trí các dấu vết dữ liệu tạm thời trên đĩa và cách khôi phục chúng. Hình ảnh pháp y học (nhân bản) của ổ cứng nằm ngoài phạm vi của cuốn sách này, cũng như các bước để duy trì quy trình nắm giữ đúng cho chứng cứ. Vì vậy, chúng tôi cho rằng bạn đã chú ý nghiên cứu và tuân thủ các luật pháp của quốc gia của bạn, nếu áp dụng cho cuộc điều tra của bạn. Ngoài ra, mặc dù có nhiều sản phẩm GUI thương mại như EnCase và FTK cung cấp các phương pháp nhấp chuột để khôi phục các tệp tin, chúng tôi tập trung vào việc sử dụng The Sleuth Kit (http://www.sleuthkit.org) vì nó là mã nguồn mở và có sẵn cho tất cả mọi người.
+
+### Recovering the Hibernation File
+
+Nếu có sẵn, tệp ngủ đông của hệ thống sẽ tồn tại tại \hiberfil.sys trong thư mục gốc của phân vùng C:. Giả sử bạn có một bản sao ghi nhớ của ổ đĩa (image.dd trong ví dụ), bạn cần trước tiên xác định sector bắt đầu của phân vùng NTFS. Để làm điều này, bạn có thể sử dụng mmls như sau:
+
+```
+$ mmls image.dd
+DOS Partition Table
+Offset Sector: 0
+Units are in 512-byte sectors
+
+    Slot Start End Length Description
+00: Meta  0000000000 0000000000 0000000001 Primary Table (#0)
+01: ----- 0000000000 0000002047 0000002048 Unallocated
+02: 00:00 0000002048 0031455231 0031453184 NTFS (0x07)
+03: ----- 0031455232 0031457279 0000002048 Unallocated
+```
+
+Nếu có sẵn, tệp ngủ đông của hệ thống sẽ tồn tại tại \hiberfil.sys trong thư mục gốc của phân vùng C:. Giả sử bạn có một bản sao ghi nhớ của ổ đĩa (image.dd trong ví dụ), bạn cần trước tiên xác định sector bắt đầu của phân vùng NTFS. Để làm điều này, bạn có thể sử dụng mmls như sau:
+
+```
+$ fls -o 2048 image.dd | grep hiber
+r/r 36218-128-1: hiberfil.sys
+```
+
+Mục tiêu hoặc số MFT trong trường hợp này là 36218. Bây giờ, tất cả những gì bạn cần làm là cung cấp phần tử lệnh và MFT cho lệnh icat để trích xuất nội dung của tệp. Trước khi thực hiện điều này, hãy đảm bảo rằng thiết bị đích có đủ không gian trống để chứa tệp ngủ đông. Dưới đây là cách thực hiện việc trích xuất:
+
+```
+$ icat –o 2048 image.dd 36218 > /media/external/hiberfil.sys
+
+$ file /media/external/hiberfil.sys
+/media/external/hiberfil.sys: data
+```
+
+Bây giờ, khi bạn đã khôi phục lại tệp ngủ đông, bạn có thể bắt đầu phân tích nó bằng Volatility. Tuy nhiên, có một lưu ý mà chúng ta sẽ khám phá tiếp theo, liên quan đến việc xác định hồ sơ (profile) thích hợp để sử dụng trong phân tích.
+
+### Querying the Registry for a Profile
+
+Thường thì, bạn sẽ nhận được bằng chứng, như một ổ đĩa cứng, mà không có bất kỳ thông tin chi tiết nào về hệ thống mục tiêu. Ví dụ, liệu đó có phải là 32-bit Windows 7 hay 64-bit Windows Server 2012? Bạn sẽ cần thông tin này để chọn hồ sơ (profile) Volatility phù hợp. Trong nhiều trường hợp, bạn có thể đơn giản chạy plugin kdbgscan, nhưng hãy nhớ rằng khối dữ liệu bộ gỡ lỗi (debugger data block) là không cần thiết và có thể bị tấn công và can thiệp bởi kẻ tấn công (xem Chương 3). Nếu điều đó xảy ra, bạn sẽ cần một phương pháp dự phòng để xác định hồ sơ hệ thống. Trong trường hợp này, bạn có quyền truy cập vào ổ cứng, chứa các hive registry, vì vậy bạn có thể tận dụng chúng trong quá trình phân tích. Các lệnh sau đây sẽ hướng dẫn bạn cách trích xuất các hive SYSTEM và SOFTWARE, sau đó xác minh rằng bạn đã khôi phục lại các tệp registry Microsoft Windows hợp lệ.
+
+```
+$ fls -o 2048 -rp image.dd | grep -i config/system$
+r/r 58832-128-3: Windows/System32/config/SYSTEM
+
+$ fls -o 2048 -rp image.dd | grep -i config/software$
+r/r 58830-128-3: Windows/System32/config/SOFTWARE
+
+$ icat -o 2048 image.dd 58832 > /media/external/system
+$ icat -o 2048 image.dd 58830 > /media/external/software
+
+$ file /media/external/system /media/external/software
+system: MS Windows registry file, NT/2000 or above
+software: MS Windows registry file, NT/2000 or above
+```
+
+Sau khi bạn trích xuất các tệp hive thích hợp, bạn có thể phân tích chúng bằng một trình phân tích registry ngoại tuyến. Trong trường hợp này, chúng ta sử dụng reglookup (một công cụ mã nguồn mở từ: http://projects .sentinelchicken.org/reglookup). Cụ thể, bạn có thể tìm giá trị ProductName trong hive SOFTWARE và giá trị PROCESSOR_ARCHITECTURE trong hive SYSTEM, như được thể hiện ở đây:
+
+```
+$ reglookup -p "Microsoft/Windows NT/CurrentVersion"
+/Microsoft/Windows NT/CurrentVersion/ProductName,SZ,Windows 7 Professional,
+ /media/external/software | grep ProductName
+
+$ reglookup
+ -p "ControlSet001/Control/Session Manager/Environment/PROCESSOR_ARCHITECTURE"
+ /media/external/system
+/ControlSet001/Control/[snip]/PROCESSOR_ARCHITECTURE,SZ,AMD64,
+```
+
+Trong đầu ra, hệ thống mục tiêu đang chạy Windows 7 Professional trên bộ vi xử lý AMD64. Do đó, hồ sơ (profile) sẽ là Win7SP0x64 hoặc Win7SP1x64. Bạn cũng có thể phân biệt giữa các bản dịch vụ bằng cách truy vấn giá trị CSDVersion trong registry.
+
+### Recovering the Page File(s)
+
+Thường chúng tôi đặt một câu hỏi "khó" cho học viên trong lớp đào tạo của chúng tôi: Nếu chúng tôi yêu cầu bạn khôi phục tệp trang, bạn sẽ tìm ở đâu? Hầu hết mọi người đều trả lời là C:\pagefile.sys. Mặc dù câu trả lời này không sai về mặt kỹ thuật, nhưng nó cũng không đầy đủ bởi vì một hệ thống Windows có thể có tới 16 tệp trang. Do đó, bạn nên xác định số lượng tệp trang có trong hệ thống và vị trí chúng trước khi thực hiện việc thu thập. Bạn có thể làm điều này bằng cách truy vấn registry SYSTEM, như được thể hiện dưới đây:
+
+```
+$ reglookup -p "ControlSet001/Control/Session Manager/Memory Management" -t MULTI_SZ /media/external/system
+
+PATH,TYPE,VALUE,MTIME
+/ControlSet001/Control/Session Manager/Memory
+Management/PagingFiles,MULTI_SZ,\??\C:\pagefile.sys,
+/ControlSet001/Control/Session Manager/Memory
+Management/ExistingPageFiles,MULTI_SZ,\??\C:\pagefile.sys,
+```
+
+Hệ thống mục tiêu chỉ có một tệp trang nên C:\pagefile.sys đã là câu trả lời đúng trong trường hợp này. Đường dẫn tệp được hiển thị hai lần, bởi vì có hai giá trị: PagingFiles (được sử dụng) và ExistingPageFiles (đang được sử dụng). Nếu một hệ thống có nhiều hơn một tệp trang, bạn sẽ thấy danh sách đầy đủ các tên đường dẫn. Bạn có thể khôi phục tệp trang từ hình ảnh đĩa như sau:
+
+```
+$ fls -o 2048 image.dd | grep pagefile
+r/r 58981-128-1: pagefile.sys
+
+$ icat –o 2048 image.dd 58981 > /media/external/pagefile.sys
+```
+
+Bây giờ bạn đã tách riêng tệp trang từ hình ảnh đĩa, bạn có thể tiếp tục vào các giai đoạn phân tích.
+
+>**Cảnh báo:**<br> Trong cùng một khóa trong hive `SYSTEM` mà chúng ta truy vấn để tìm các tệp trang, có một giá trị `ClearPageFileAtShutdown`. Chúng tôi đã thấy phần mềm độc hại thiết lập giá trị `DWORD` này thành 1 như một kỹ thuật chống pháp truy tốt, vì điều này dẫn đến việc xóa tệp trang khi hệ thống tắt nguồn. Trong trường hợp này, bạn vẫn có thể khôi phục một số dữ liệu tạm thời từ đĩa bằng cách khắc phục các khối đã giải phóng/đánh dấu lại bằng TSK hoặc một bộ công cụ pháp y tế đĩa khác.<br>
+Ngoài ra, bắt đầu từ Windows 8.1, có một giá trị có tên `SavePageFileContents` trong `CurrentControlSet\Control\CrashControl` xác định xem Windows có nên bảo tồn nội dung của tệp trang trong suốt các lần khởi động lại hay không.
+
+### Analyzing the Page File(s)
+
+Nếu bạn nhớ từ trước trong chương này, một số công cụ phần mềm chạy trên hệ thống thời gian thực có thể thu thập tệp trang tại thời điểm thu thập. Dù bạn đã sử dụng một trong những công cụ đó hoặc trích xuất các tệp từ hình ảnh đĩa, các tùy chọn cho phân tích chi tiết nội dung tệp trang khá hạn chế. Hãy nhớ rằng một tệp trang chỉ là một tập hợp các mảnh ghép không theo thứ tự - mà không có bảng trang để cung cấp ngữ cảnh cần thiết, bạn không thể xác định chúng được sắp xếp như thế nào vào hình dung lớn hơn.
+
+Nguyên tắc và Phân Tích Bộ Nhớ Windows bởi Nicholas Paul Maclean (http://www.4tphi.net/fatkit/papers/NickMaclean2006.pdf) đã mô tả khả năng bổ sung phân tích bộ nhớ thô bằng dữ liệu từ tệp trang để cung cấp một cái nhìn hoàn chỉnh hơn về bộ nhớ vật lý. Tuy nhiên, đối với hầu hết các trường hợp, việc thực hiện thực tế của kỹ thuật này chưa được xác minh hoặc không thể tiếp cận.
+
+Tài liệu của HBGary Responder khẳng định rằng nó hỗ trợ phân tích tệp trang. Ngoài ra, WinDBG quảng cáo hỗ trợ tích hợp tệp trang (xem http://msdn.microsoft.com/en-us/library/windows/hardware/dn265151%28v=vs.85%29.aspx). Cụ thể, theo tài liệu, bạn có thể tạo một tệp CAB chứa bản ghi bộ nhớ và các tệp trang và phân tích nó với bộ gỡ lỗi. Tuy nhiên, một cuộc thảo luận trên danh sách gửi OSR cho thấy tuyên bố này chủ yếu là sai lầm (hoặc chỉ đơn giản là lỗi thời) (http://www.osronline.com/showthread.cfm?link=234512).
+
+Mặc dù phân tích tệp trang đang nằm trong kế hoạch của chúng tôi, vào thời điểm viết bài này, bạn không thể thực hiện phân tích như vậy với Volatility. Do đó, tùy chọn điều tra tốt nhất của bạn hiện tại là những tùy chọn không liên quan đến ngữ cảnh hoặc phân tích cấu trúc của dữ liệu - chẳng hạn như xâu, quét antivirus hoặc chữ ký Yara. Trên thực tế, Michael Matonis đã tạo một công cụ gọi là page_brute (xem https://github.com/matonis/page_brute) để phân tích các tệp trang bằng cách chia chúng thành các khối có kích thước trang và quét từng khối bằng luật Yara. Bộ luật Yara mặc định đi kèm với công cụ có thể phát hiện các yêu cầu và phản hồi HTTP, tiêu đề thư SMTP, các lệnh FTP, v.v. Như luôn luôn, bạn có thể thêm vào các quy tắc mặc định hoặc tạo các tập luật riêng của riêng bạn để tùy chỉnh quét.
+
+Hãy giả sử rằng bạn đang điều tra máy tính của một đối tượng bị buộc tội mua bán chất cấm trên mạng. Trình duyệt của đ ối tượng đã được cấu hình không lưu nội dung vào đĩa và không giữ một tệp lịch sử. Hơn nữa, hệ thống máy tính không hoạt động khi nó bị thu giữ, do đó tất cả những gì bạn có là một hình ảnh đĩa pháp y. Bằng cách xác định và trích xuất các tệp trang, bạn hy vọng tìm thấy một số bằng chứng liên quan đến hành vi nghi vấn của đối tượng. Bạn tạo một luật Yara sau để hỗ trợ việc tìm kiếm: 
+
+```
+rule drugs
+{
+    strings:
+    $s0 = "silk road" nocase ascii wide
+    $s1 = "silkroad" nocase ascii wide
+    $s2 = "marijuana" nocase ascii wide
+    $s3 = "bitcoin" nocase ascii wide
+    $s4 = "mdma" nocase ascii wide
+
+    condition:
+    any of them
+}
+```
+
+Lệnh sau đây sẽ thực hiện quét và phân tích tệp trang theo luật Yara có tên `drugs` mà bạn đã tạo trước đó:
+
+```
+$ python page_brute-BETA.py -r drugs.yar -f /media/external/pagefile.sys
+[+] - YARA rule of File type provided for compilation: drugs.yar
+..... Ruleset Compilation Successful.
+[+] - PAGE_BRUTE running with the following options:
+    [-] - PAGE_SIZE: 4096
+    [-] - RULES TYPE: FILE
+    [-] - RULE LOCATION: drugs.yar
+    [-] - INVERSION SCAN: False
+    [-] - WORKING DIR: PAGE_BRUTE-2014-03-24-12-49-57-RESULTS
+    =================
+ [snip]
+    [!] FLAGGED BLOCK 58641: drugs
+    [!] FLAGGED BLOCK 58642: drugs
+    [!] FLAGGED BLOCK 58643: drugs
+    [!] FLAGGED BLOCK 58646: drugs
+    [!] FLAGGED BLOCK 58652: drugs
+    [!] FLAGGED BLOCK 58663: drugs
+    [!] FLAGGED BLOCK 58670: drugs
+    [!] FLAGGED BLOCK 58684: drugs
+    [!] FLAGGED BLOCK 58685: drugs
+    [!] FLAGGED BLOCK 58686: drugs
+    [!] FLAGGED BLOCK 58687: drugs
+    [!] FLAGGED BLOCK 58688: drugs
+    [!] FLAGGED BLOCK 58689: drugs
+ [snip]
+```
+
+Các số tiếp theo sau thông báo "FLAGGED BLOCK" là chỉ mục của trang tương ứng trong tệp trang. Mỗi trang phù hợp với một chữ ký sẽ được trích xuất trong thư mục làm việc (PAGE_BRUTE-2014-03-24-12-49-57-RESULTS) được đặt tên theo chỉ mục. Sau đó, bạn có thể phân tích từng khối dữ liệu được trích xuất một cách riêng lẻ hoặc, để xem sơ bộ dữ liệu, bạn có thể chạy lệnh "strings" cho toàn bộ thư mục như sau:
+
+```
+$ cd PAGE_BRUTE-2014-03-24-12-49-57-RESULTS/drugs
+$ strings * | less
+
+https://bitcoin.org/font/ubuntu-bi-webfont.ttf
+chrome://browser/content/urlbarBindings.xml#promobox
+https://coinmkt.com/js/libs/autoNumeric.js?v=0.0.0.8
+Bitcoin
+Getting
+https://bitcoin.org/font/ubuntu-ri-webfont.svg
+https://bitcoin.org/font/ubuntu-ri-webfont.woff
+wallet
+Z N
+http://howtobuybitcoins.info/img/miniflags/us.png
+http://silkroaddrugs.org/silkroad-drugs-complete-step-by-step-guide/#c-3207
+Location:
+you want to also check out Silk Roads biggest competitor the click
+silkroad6ownowfk.onion/categories/drugs-ecstasy/items
+http://silkroaddrugs.org/silkroad-drugs-complete-step-by-step-guide/#c-2587
+
+[snip]
+```
+
+Đáng kể là rằng dù tình nghi đã cố gắng giảm thiểu các dấu vết trong lịch sử duyệt web, bạn vẫn có thể tìm thấy chứng cứ về hoạt động đó bằng cách xem xét tệp trang. Điểm quan trọng là việc ẩn hoặc xóa dấu vết trong bộ nhớ nhiều khó khăn hơn so với trên đĩa cứng, đặc biệt khi hệ điều hành tự động ghi một phần bộ nhớ xuống đĩa cứng trong quá trình hoạt động thông thường như đẩy trang (paging).
+
+>**GHI CHÚ**<br>
+Người dùng chạy Windows 7 hoặc phiên bản sau đó có thể tùy chọn mã hóa các tệp trang hệ thống bằng Hệ thống Tệp Mã Hóa (EFS). Mặc dù nó bị tắt mặc định, bạn có thể gõ fsutil behavior query EncryptPagingFile tại cửa sổ lệnh quản trị để xem trạng thái hiện tại.<br>
+Trên Linux, phân vùng swap thực chất là một phân vùng thay vì một tệp (bạn có thể liệt kê vị trí với lệnh cat /proc/swaps hoặc xem trong /etc/fstab). Tuy nhiên, bạn sẽ cần một hình ảnh đĩa để truy cập nội dung.  Đối với Mac OS X, swap được mã hóa theo mặc định từ phiên bản 10.7 trở đi. Bạn có thể liệt kê các tệp trong thư mục /var/vm hoặc truy vấn trạng thái bằng lệnh sysctl, như được thể hiện dưới đây:<br>
+ ```
+ $ ls -al /var/vm/*
+ -rw------T 1 root wheel 2147483648 Mar 2 11:24 /var/vm/sleepimage
+ -rw------- 1 root wheel 67108864 Apr 9 09:24 /var/vm/swapfile0
+ -rw------- 1 root wheel 1073741824 Apr 28 22:28 /var/vm/swapfile1
+ -rw------- 1 root wheel 1073741824 Apr 28 22:28 /var/vm/swapfile2
+ $ sysctl vm.swapusage
+ vm.swapusage: total = 2048.00M used = 1061.00M free = 987.00M (encrypted)
+```
+ 
+### Crash Dump Files
+
+Nhiều hệ thống được cấu hình để ghi crash dump vào đĩa khi gặp lỗi BSOD (Blue Screen of Death). Do đó, bạn có thể muốn kiểm tra các tệp được tạo ra trong các lần crash trước đó mà có thể chưa được xóa. Mặc định, chúng được lưu tại %SystemRoot%\MEMORY.DMP; tuy nhiên, bạn có thể thay đổi đường dẫn này bằng cách chỉnh sửa khóa CurrentControlSet\Control\CrashControl trong hạt hive SYSTEM. Trong quá trình kiểm tra, bạn cũng nên kiểm tra các đường dẫn Windows Error Reporting (Dr. Watson) trong khóa Software\Microsoft\Windows\Windows Error Reporting của cả HKEY_CURRENT_USER và HKEY_LOCAL_MACHINE. Có thể bạn chỉ tìm thấy các user-mode dump (không phải là complete dump) ở đó, nhưng chúng vẫn có thể là một nguồn dữ liệu quan trọng về trạng thái tạm thời của hệ thống trong những giai đoạn không ổn định.
+
+>**Lưu ý**<br> rằng nếu hệ thống mục tiêu đã bật dịch vụ Volume Shadow Copy Service (VSS), thì các nguồn dữ liệu tạm thời thay thế này có thể cũng có sẵn và chứa dữ liệu từ các khoảng thời gian trước đó. VSS cho phép tạo ra các bản sao "shadow" của các tệp và thư mục tại những điểm thời gian cụ thể, tạo cơ hội để khám phá thông tin từ các bản sao này.
+
+## Tổng quan
+
+Việc thu thập bộ nhớ vật lý một cách chính xác đòi hỏi kế hoạch cẩn thận, công cụ mạnh mẽ và tuân thủ các phương pháp tốt nhất. Hãy cân nhắc kỹ lưỡng các lựa chọn của bạn dựa trên môi trường và đặc thù của từng công việc trước khi chọn một kỹ thuật hoặc bộ công cụ phần mềm, bởi vì khả năng phân tích của bạn phụ thuộc vào việc thu thập thành công. Hãy nhớ rằng bằng chứng từ bộ nhớ thường được tìm thấy trên phương tiện không tạm thời và nó xuất hiện dưới nhiều "hình thức và kích thước" khác nhau, để nói một cách trường hợp. Hãy nhận thức về các định dạng khác nhau, cách chuyển đổi giữa các định dạng (nếu cần thiết) và những thách thức mà mỗi loại mẫu bộ nhớ đem lại.

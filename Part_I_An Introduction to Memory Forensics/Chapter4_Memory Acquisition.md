@@ -445,3 +445,19 @@ Bạn cũng có thể thu thập bộ nhớ từ máy ảo Hyper-V đang chạy 
 ### Hypervisor Memory Forensics
 
 Một trong những phát triển thú vị nhất trong pháp y VM memory là Actaeon (http://www.s3.eurecom.fr/tools/actaeon) do Mariano Graziano, Andrea Lanzi và Davide Balzarotti tạo ra. Với một bản sao lưu bộ nhớ vật lý của hệ thống chủ, công cụ này cho phép phân tích các hệ điều hành máy ảo trong môi trường ảo hóa sử dụng công nghệ Intel VT-x. Điều này bao gồm khả năng xác định các trình giả lập bộ nhớ cư trú (tích cực hoặc độc hại) và ảo hóa lồng nhau. Hiện tại, Actaeon cho phép trình giám sát máy ảo của các máy khách Windows 32-bit chạy dưới KVM, Xen, VMware Workstation, VirtualBox và HyperDbg. Actaeon được thực hiện dưới dạng một bản vá cho Volatility và đã giành giải nhất trong Cuộc thi Plugin Volatility năm 2013 (http://volatility-labs.blogspot.com/2013/08/results-are-in-for-1st-annual.html).
+
+## Converting Memory Dumps
+
+Ngoại trừ Volatility, hầu hết các framework phân tích bộ nhớ chỉ hỗ trợ một hoặc hai định dạng tập tin được đề cập ở phần trước. Nếu bạn nhận được một bản sao lưu bộ nhớ trong một định dạng không tương thích với công cụ phân tích mong muốn, bạn nên xem xét chuyển đổi nó. Như đã đề cập trước đó, định dạng raw là được hỗ trợ rộng rãi nhất, vì vậy thường trở thành định dạng đích trong quá trình chuyển đổi. Dưới đây là danh sách các công cụ có thể hỗ trợ bạn trong việc này:
+
+- MoonSols Windows Memory Toolkit (MWMT): Bộ công cụ này cung cấp các tiện ích để chuyển đổi tệp hibernation và crash dump thành định dạng raw. Nó cũng có thể chuyển đổi tệp hibernation và raw thành crash dump.
+
+- VMware vmss2core: Tiện ích vmss2core.exe (https://labs.vmware.com/flings/vmss2core) có thể chuyển đổi các tệp trạng thái đã lưu của VMware (.vmsn) hoặc snapshot (.vmsn) thành crash dump tương thích với Microsoft WinDBG hoặc gdb.
+
+- Microsoft vm2dmp: Như đã mô tả trước đó, công cụ này có thể chuyển đổi một số tệp bộ nhớ Microsoft Hyper-V thành crash dump (phụ thuộc vào kích thước bộ nhớ và phiên bản máy chủ Hyper-V).
+
+- Volatility imagecopy: Plugin imagecopy có thể sao chép một raw memory dump từ bất kỳ định dạng tệp nào sau đây: crash dump, tệp hibernation, VMware, VirtualBox, QEMU, Firewire, Mach-o, LiME và EWF.
+
+- Volatility raw2dmp: Plugin raw2dmp có thể chuyển đổi raw memory dump thành Windows crash dump để phân tích bằng trình gỡ lỗi WinDBG của Microsoft.
+
+

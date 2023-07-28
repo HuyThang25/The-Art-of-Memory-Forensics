@@ -65,3 +65,60 @@ Bảng 5-2 hiển thị các tiêu đề tùy chọn có sẵn trên các hệ t
 ### Object Type Objects
 
 Hãy quay lại cái bảng mà tôi đưa ra ở Chương 5 và kiểm tra xem TypeIndex value tương ứng với loại đối tượng nào. Điều này giúp bạn xác định loại đối tượng mà theo sau _OBJECT_HEADER. Ví dụ, các mục của bảng xử lý (process handle table entries) trỏ đến các tiêu đề đối tượng (object headers). Do đó, khi bạn liệt kê các mục trong bảng xử lý, dữ liệu mà theo sau tiêu đề là tùy ý - nó có thể là _FILE_OBJECT, _EPROCESS, hoặc bất kỳ đối tượng thực thi khác. Bạn có thể phân biệt giữa các khả năng bằng cách xem TypeIndex value, xác định _OBJECT_TYPE tương ứng với chỉ số đó, và sau đó đánh giá thành viên Name. Tham khảo bảng ở Chương 5 để biết sự tương ứng giữa tên loại đối tượng và tên cấu trúc của chúng.
+
+**Data Structures**
+
+On a 64-bit Windows 7 system, the pool header looks like this:
+
+```
+>>> dt("_POOL_HEADER")
+'_POOL_HEADER' (16 bytes)
+0x0 : BlockSize                 ['BitField', {'end_bit': 24,
+                                  'start_bit': 16, 'native_type': 'unsigned long'}]
+0x0 : PoolIndex                 ['BitField', {'end_bit': 16,
+                                  'start_bit': 8, 'native_type': 'unsigned long'}]
+0x0 : PoolType                  ['BitField', {'end_bit': 32,
+                                  'start_bit': 24, 'native_type': 'unsigned long'}]
+0x0 : PreviousSize              ['BitField', {'end_bit': 8,
+                                  'start_bit': 0, 'native_type': 'unsigned long'}]
+0x0 : Ulong1                    ['unsigned long']
+0x4 : PoolTag                   ['unsigned long']
+0x8 : AllocatorBackTraceIndex   ['unsigned short']
+0x8 : ProcessBilled             ['pointer64', ['_EPROCESS']]
+0xa : PoolTagHash               ['unsigned short']
+```
+**Key Points**
+
+Các điểm quan trọng là:
+- BlockSize: Tổng kích thước của phân bổ, bao gồm pool header, object header và bất kỳ optional headers nào.
+- PoolType: Loại bộ nhớ hệ thống (paged, nonpaged, v.v.) mà pool header này mô tả.
+- PoolTag: Một giá trị 4 byte, thường được tạo bởi các ký tự ASCII, nên định danh độc nhất con đường mã được sử dụng để tạo ra phân bổ (để có thể theo dõi lại các khối dữ liệu gây rối đến nguồn gốc của chúng). Trên các hệ thống trước Windows 8 và Server 2012, một trong các ký tự có thể được sửa đổi để đặt "bit bảo vệ" (bạn có thể đọc thêm thông tin về điều này trong ghi chú gần Bảng 5-3).
+
+### Allocation APIs
+
+Trước khi tạo một phiên bản của một executive object (hoặc bất kỳ object nào), một khối bộ nhớ đủ lớn để lưu trữ object và các header của nó phải được cấp phát từ một trong các pool của hệ điều hành. Một giao diện lập trình ứng dụng (API) thường được sử dụng cho mục đích này là ExAllocatePoolWithTag. Prototype của hàm như sau:
+
+```
+PVOID ExAllocatePoolWithTag(
+    _In_ POOL_TYPE PoolType,
+    _In_ SIZE_T NumberOfBytes,
+    _In_ ULONG Tag
+);
+```
+
+Đối số PoolType xác định loại bộ nhớ hệ thống được sử dụng cho việc cấp phát. Giá trị NonPagedPool (0) và PagedPool (1) là các giá trị liệt kê cho bộ nhớ không có thể trang và bộ nhớ có thể trang tương ứng. Như đã hiển thị trước đó, hầu hết, nhưng không phải tất cả, các loại executive object được cấp phát bằng bộ nhớ không có thể trang - và bạn luôn có thể phân biệt bằng cách xem vào thành viên _OBJECT_TYPE.TypeInfo.PoolType của một object cụ thể.
+
+>**LƯU Ý**<br> Có nhiều cờ khác nhau bạn có thể chỉ định để điều khiển việc bộ nhớ có thể thực thi, được căn chỉnh bộ nhớ cache và nhiều thuộc tính khác. Để biết thêm thông tin, hãy xem tại địa chỉ http://msdn.microsoft.com/en-us/library/windows/hardware/ff559707(v=vs.85).aspx.
+
+Tham số NumberOfBytes chứa số byte cần được cấp phát. Các trình điều khiển gọi ExAllocatePoolWithTag trực tiếp có thể đặt tham số này là kích thước dữ liệu họ cần lưu trữ trong khối bộ nhớ. Nhưng các executive object khác biệt, như bạn đã học, vì chúng yêu cầu không gian bổ sung để lưu trữ object headers và optional headers. Một hàm trong kernel được gọi là ObCreateObject là điểm trung tâm từ đó tất cả các executive object được tạo ra. Nó xác định kích thước của cấu trúc được yêu cầu (ví dụ: 1232 byte cho một _EPROCESS trên 64-bit Windows 7) và thêm kích thước của _OBJECT_HEADER và bất kỳ optional headers nào cần có trước khi gọi ExAllocatePoolWithTag.
+
+Tham số Tag chỉ định một giá trị bốn byte, thường được tạo thành từ các ký tự ASCII, để định danh duy nhất đoạn mã được sử dụng để cấp phát (nhằm theo dõi các khối bộ nhớ gây rối đến nguồn gốc của chúng). Trong trường hợp của executive object, các tag được xuất phát từ _OBJECT_TYPE.Key—điều này giải thích tại sao Tag là giống nhau cho tất cả các đối tượng cùng loại.
+
+Giả sử một tiến trình muốn tạo một tệp mới bằng cách sử dụng Windows API, các bước sau sẽ xảy ra:
+
+1. Tiến trình gọi CreateFileA (ASCII) hoặc CreateFileW (Unicode)—cả hai đều được xuất ra từ kernel32.dll.
+2. Các API tạo file chuyển đến ntdll.dll, sau đó gọi vào kernel và đến hàm NtCreateFile native.
+3. NtCreateFile sẽ gọi ObCreateObject để yêu cầu một loại đối tượng File mới.
+4. ObCreateObject tính toán kích thước của _FILE_OBJECT, bao gồm không gian bổ sung cần thiết cho optional headers của nó.
+5. ObCreateObject tìm _OBJECT_TYPE structure cho các đối tượng File và xác định xem có cần phải cấp phát bộ nhớ có trang hay không trang, cũng như tag bốn byte để sử dụng.
+6. Gọi ExAllocatePoolWithTag với kích thước, loại bộ nhớ và tag phù hợp.

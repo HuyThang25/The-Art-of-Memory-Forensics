@@ -397,3 +397,24 @@ Module PSScan
 Pool scanner for process objects
 ```
 
+Dưới đây là các mô tả về các tùy chọn:
+- -V/--virtual: Khi quét các phân bổ pool, bạn có thể sử dụng không gian địa chỉ kernel ảo hoặc không gian địa chỉ vật lý. Theo mặc định, Volatility sử dụng không gian vật lý vì nó bao gồm càng nhiều bộ nhớ càng tốt - ngay cả các khối không nằm trong bảng trang của kernel hiện tại. Điều này cho phép bạn khôi phục các đối tượng từ "slack space" trong RAM. Để chuyển sang chế độ chỉ quét các trang hoạt động mà kernel hiện đang ánh xạ, sử dụng tùy chọn -V/--virtual.
+- -W/--show-unallocated: Thiết lập này điều khiển xem liệu plugin có hiển thị các đối tượng mà hệ điều hành đánh dấu rõ ràng là không được phân bổ hay không. Để biết thêm thông tin, xem bài đăng trên blog của Andreas Schuster tại đây: http://computer.forensikblog.de/en/2009/04/0xbad0b0b0.html.
+- -S/--start và –L/--length: Nếu bạn muốn quét chỉ một phạm vi bộ nhớ cụ thể thay vì toàn bộ bộ nhớ, bạn có thể chỉ định địa chỉ bắt đầu và độ dài mong muốn bằng cách sử dụng các tùy chọn này. Địa chỉ được xác định là một vị trí trong bộ nhớ vật lý hoặc ảo tùy thuộc vào việc có đặt cờ -V/--virtual hay không.
+
+#### Pool Scanner Algorithm
+
+Lớp cơ sở PoolScanner (và do đó bất kỳ bộ quét nào kế thừa nó) sử dụng logic được hiển thị trong Hình 5-3 để tạo kết quả.
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-28%20203905.png)
+
+Nếu bạn quét bằng không gian địa chỉ vật lý, mã sẽ bắt đầu tìm kiếm tag pool 4 byte tại vị trí 0 của tệp dump bộ nhớ và tiếp tục cho đến khi đạt đến cuối tệp. Nếu bạn chọn không gian địa chỉ ảo, mã sẽ liệt kê và quét tất cả các trang trong bảng trang của kernel. Tất nhiên, nếu bạn đặt địa chỉ bắt đầu và độ dài cụ thể bằng cách sử dụng các tùy chọn dòng lệnh đã đề cập, điều đó sẽ ghi đè lên hành vi mặc định của thuật toán. Trước khi bộ quét trả về một địa chỉ, dữ liệu tại địa chỉ đó phải vượt qua tất cả các ràng buộc. Càng nhiều kiểm tra bạn có, càng giảm khả năng xuất hiện các kết quả sai.
+
+#### Finding Terminated Processes
+
+
+Một ví dụ về việc chạy plugin psscan với tất cả các tùy chọn mặc định được hiển thị trong kết quả sau đây:
+
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-28%20204252.png)
+

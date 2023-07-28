@@ -430,10 +430,123 @@ Phương pháp quét thẻ pool cung cấp một cách mạnh mẽ để tìm ki
 
 Dưới đây là danh sách những hạn chế không phải do sự can thiệp xâm phạm của bằng chứng.
 
-- Bộ nhớ pool không được gắn thẻ: ExAllocatePoolWithTag là cách được đề xuất bởi Microsoft để các trình điều khiển và các thành phần chế độ kernel cấp phát bộ nhớ, nhưng không phải là tùy chọn duy nhất. Một trình điều khiển cũng có thể sử dụng ExAllocatePool, một API đang trong quá trình bị loại bỏ, nhưng vẫn có sẵn trên nhiều phiên bản Windows. API này cấp phát bộ nhớ nhưng không có thẻ, khiến bạn không có cách dễ dàng để theo dõi hoặc quét các phân bổ này.
+- Untagged pool memory (Bộ nhớ pool không được gắn thẻ): ExAllocatePoolWithTag là cách được đề xuất bởi Microsoft để các trình điều khiển và các thành phần chế độ kernel cấp phát bộ nhớ, nhưng không phải là tùy chọn duy nhất. Một trình điều khiển cũng có thể sử dụng ExAllocatePool, một API đang trong quá trình bị loại bỏ, nhưng vẫn có sẵn trên nhiều phiên bản Windows. API này cấp phát bộ nhớ nhưng không có thẻ, khiến bạn không có cách dễ dàng để theo dõi hoặc quét các phân bổ này.
 
-- Các kết quả giả vờ: Vì phương pháp quét thẻ pool dựa essentially dựa trên phù hợp mẫu và heuristic, việc có kết quả giả vờ là khả năng có thể xảy ra. Điều này đặc biệt đúng khi quét không gian địa chỉ vật lý vì nó bao gồm dữ liệu mà hệ điều hành đã loại bỏ. Để giải quyết các kết quả giả vờ, thường bạn cần xem xét ngữ cảnh của đối tượng (nơi nó được tìm thấy), xem giá trị của các thành viên có hợp lý (điều này có thể thay đổi cho từng đối tượng) và xem xét liệu bạn có tìm thấy đối tượng bằng các phương pháp khác như danh sách thay thế.
+- False positives (Các kết quả giả vờ): Vì phương pháp quét thẻ pool dựa essentially dựa trên phù hợp mẫu và heuristic, việc có kết quả giả vờ là khả năng có thể xảy ra. Điều này đặc biệt đúng khi quét không gian địa chỉ vật lý vì nó bao gồm dữ liệu mà hệ điều hành đã loại bỏ. Để giải quyết các kết quả giả vờ, thường bạn cần xem xét ngữ cảnh của đối tượng (nơi nó được tìm thấy), xem giá trị của các thành viên có hợp lý (điều này có thể thay đổi cho từng đối tượng) và xem xét liệu bạn có tìm thấy đối tượng bằng các phương pháp khác như danh sách thay thế.
 
-- Các phân bổ lớn: Kỹ thuật quét thẻ pool không hoạt động với các phân bổ lớn hơn 4096 byte (xem phần "Big Page Pool" sắp tới). May mắn thay, tất cả các đối tượng thực thi đều nhỏ hơn kích thước này.
+- Large allocations (Các phân bổ lớn): Kỹ thuật quét thẻ pool không hoạt động với các phân bổ lớn hơn 4096 byte (xem phần "Big Page Pool" sắp tới). May mắn thay, tất cả các đối tượng thực thi đều nhỏ hơn kích thước này.
 
 ### Malicious Limitations (Anti-Forensics)
+
+Dưới đây là danh sách các lưu ý về quét thẻ pool liên quan đến các cuộc tấn công chống pháp luật:
+
+- Arbitrary tags (Thẻ tùy ý): Một trình điều khiển có thể cấp phát bộ nhớ bằng cách sử dụng một thẻ thông thường, hoặc mặc định, chẳng hạn như "Ddk " (ký tự cuối cùng là dấu cách). Thẻ này được sử dụng trong toàn bộ hệ điều hành và cũng trong mã của bên thứ ba khi không xác định thẻ cụ thể. Nói cách khác, nếu các trình điều khiển độc hại sử dụng "Ddk " làm thẻ của họ, khối bộ nhớ sẽ hoà quyện với các phân bổ khác.
+
+- Decoy tags (Các thẻ giả mạo): Như được nêu bởi Walters và Petroni, một trình điều khiển có thể tạo ra các đối tượng giả mạo (hoặc thẻ giả mạo) trông "giống cuộc sống" để đánh lừa nhà điều tra, tăng hiệu suất tín hiệu và nhiễu.
+
+- Manipulated tags (Thẻ bị thao tác): Vì thẻ được dùng cho mục đích gỡ lỗi, chúng không quan trọng đối với sự ổn định của hệ điều hành. Rootkit chạy trong kernel có thể thay đổi thẻ pool (hoặc bất kỳ giá trị nào trong _POOL_HEADER, chẳng hạn như kích thước khối và loại bộ nhớ) mà không có sự khác biệt đáng kể trên máy thực, nhưng sự thao tác này ngăn trình quét thẻ pool của Volatility hoạt động đúng cách.
+
+Bạn có thể đối phó với hầu hết, nếu không phải tất cả, các kỹ thuật chống pháp luật bằng cách xác minh bằng các nguồn dữ liệu khác. Ví dụ, trong Chương 6, chúng tôi thảo luận về ít nhất sáu cách để tìm quy trình - chỉ một trong số đó liên quan đến quét thẻ pool. Để bác bỏ một đối tượng kết nối TCP giả mạo, bạn nên tham khảo các ghi nhận gói tin mạng hoặc nhật ký tường lửa, và tiếp tục kiểm tra xem hoạt động thực sự đã xảy ra hay chưa.
+
+## Big Page Pool
+
+Như đã đề cập trước đó, kernel Windows sẽ cố gắng nhóm các phân bổ có kích thước tương tự cùng nhau. Tuy nhiên, nếu kích thước yêu cầu vượt quá một trang (4096 byte), khối bộ nhớ được phân bổ từ một pool đặc biệt (gọi là big page pool) dành riêng cho các phân bổ lớn. Trong trường hợp này, _POOL_HEADER, chứa tag bốn byte và tồn tại tại địa chỉ cơ sở cho các phân bổ nhỏ hơn, không được sử dụng. Do đó, việc quét tag pool sẽ thất bại vì không có tag nào được tìm thấy. Hình 5-4 cho thấy sự khác biệt trong cấu trúc bộ nhớ giữa hai phân bổ lân cận của kernel có kích thước nhỏ hơn 4096 byte và hai phân bổ lớn hơn 4096 byte.
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-28%20233439.png)
+
+Như bạn có thể thấy, các cấu trúc _POOL_HEADER không được lưu trữ cho các phân bổ lớn. Nhằm chứng minh ý tưởng, chúng tôi đã viết một trình điều khiển kernel mà kẹp lấy API ObCreateObject và tăng kích thước các phân bổ được sử dụng để lưu trữ đối tượng _EPROCESS. Như chúng tôi nghi ngờ, plugin psscan của Volatility không tìm thấy các quy trình mới do tag Proc không tồn tại. Tuy nhiên, cũng có một điều may mắn, bạn vẫn không hoàn toàn tuyệt vọng; bạn chỉ cần tìm ở một nơi khác so với thông thường. Ví dụ, Hình 5-4 cho thấy bảng theo dõi trang lớn (big page track tables) có thể trỏ trực tiếp đến các đối tượng trong big page pools.
+
+### Big Page Track Tables
+
+Bảng theo dõi trang lớn (big page track tables) có sự khác biệt đáng kể so với các bảng theo dõi pool đã được đề cập trước đó trong chương. Các bảng theo dõi pool (_POOL_TRACKER_TABLE) cho các khối bộ nhớ nhỏ lưu trữ thông tin thống kê về số lượng phân bổ và sử dụng byte; nhưng chúng không cung cấp địa chỉ của tất cả các phân bổ (do đó cần phải quét). Bảng theo dõi trang lớn, tuy nhiên, không lưu trữ thông tin thống kê, nhưng chúng bao gồm các địa chỉ của các phân bổ. Nếu bạn có thể tìm thấy các bảng theo dõi trang lớn, chúng có thể phục vụ như bản đồ giúp bạn xác định bất kỳ phân bổ lớn nào trong bộ nhớ kernel.
+
+Thật không may, ký hiệu kernel nt!PoolBigPageTable, trỏ đến mảng các cấu trúc _POOL_TRACKER_BIG_PAGES (một cho mỗi phân bổ lớn), không được xuất khẩu hoặc sao chép vào khối dữ liệu kernel debugger. Tuy nhiên, chúng tôi đã phát hiện ra rằng ký hiệu này luôn luôn có thể được tìm thấy ở vị trí có thể dự đoán được liên quan đến nt!PoolTrackTable (được sao chép vào khối dữ liệu debugger). Do đó, nếu bạn có thể tìm thấy các bảng theo dõi pool, bạn có thể dễ dàng tìm thấy các bảng theo dõi trang lớn.
+
+Đầu ra sau đây cho thấy cấu trúc bảng theo dõi trang lớn cho hệ thống Windows 7 64-bit:
+
+```
+>>> dt("_POOL_TRACKER_BIG_PAGES")
+'_POOL_TRACKER_BIG_PAGES' (24 bytes)
+0x0  : Va               ['pointer64', ['void']]
+0x8  : Key              ['unsigned long']
+0xc  : PoolType         ['unsigned long']
+0x10 : NumberOfBytes    ['unsigned long long']
+```
+
+Phần tử "Va" (Virtual Address) chỉ đến địa chỉ cơ sở của phân bổ. Bạn cũng có thể thấy giá trị "Key" (pool tag), "PoolType" (trang hoặc không trang) và "NumberOfBytes" (kích thước của phân bổ). Hãy nhớ rằng mặc dù cấu trúc này lưu trữ pool tag, nó nằm ở một vị trí hoàn toàn khác với phân bổ, mà được trỏ đến bởi "Va". Đối với các phân bổ nhỏ, pool tag nằm trong phân bổ chính (hãy nhớ lại những gì bạn đã thấy trong Hình 5-4).
+
+### Bigpools Plugin
+
+Để tạo thông tin về các phân bổ pool kernel lớn trong bộ nhớ, bạn có thể sử dụng plugin "bigpools". Lệnh dưới đây cho thấy một ví dụ về đầu ra:
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-28%20234251.png)
+
+Cột "Allocation" cho biết địa chỉ bộ nhớ kernel mà phân bổ bắt đầu. Nếu bạn muốn xem nội dung của khu vực đó, bạn có thể trích xuất dữ liệu tại địa chỉ đó bằng volshell. Một số tài liệu cho biết các phân bổ với địa chỉ kết thúc bằng số 1 (ví dụ: 0xfffff8a00f9a8001) nằm trong bộ nhớ không trang; tuy nhiên, theo nghiên cứu của chúng tôi, số 1 thể hiện trạng thái "đã giải phóng" (free). Do đó, bạn có thể thử hiển thị những địa chỉ đó, nhưng chúng có thể không chứa những gì bạn mong đợi dựa trên pool tag. Ví dụ, so sánh một số khối CM31 như sau: 
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-28%20234320.png)
+
+Địa chỉ đầu tiên (0xfffff8a003747000) chứa "hbin" ở đầu và một số ví dụ về "vk." Như đã đề cập trước đó, "CM" trong CM31 đại diện cho Configuration Manager, là thành phần của cơ sở dữ liệu Registry của kernel. "hbin" và "vk" là các chữ ký cho các khối HBIN của Registry và các giá trị riêng lẻ, tương ứng (xem Chương 10). Các địa chỉ thứ hai (0xfffff8a00f9a8001) và thứ ba (0xfffff8a00861d001) đều được đánh dấu là miễn phí, nhưng có sự khác biệt đáng kể giữa chúng. Một trong số này không có sẵn, có thể vì đã bị đẩy ra đĩa cứng - cuối cùng, nó nằm trong bộ nhớ được phân trang. Còn một cái khác có vẻ đã được cấp phát lại và ghi đè lên, vì chữ ký "hbin" đã biến mất.
+
+### Exploring Big Page Pools
+
+Trên một hệ thống thông thường, có hàng nghìn phân vùng trong big page pool, vì vậy bạn có thể muốn sử dụng tùy chọn --tags cho plugin (một danh sách các tag phân tách bằng dấu phẩy để tìm kiếm). Nếu không, nếu bạn chỉ đang khám phá, bạn có thể lưu danh sách các phân vùng vào một tệp văn bản, sau đó sắp xếp dựa trên tần suất của tag. Ví dụ, xem mã sau đây:
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-28%20234341.png)
+
+>**LƯU Ý**<br>
+Các mô tả cho các pool tag không được tạo tự động bởi các lệnh hiển thị. Chúng tôi đã tìm kiếm thủ công trong tệp pooltag.txt và thêm chúng để chú thích kết quả đầu ra.
+
+Dựa vào các mô tả, bạn có thể thấy rằng dữ liệu trong big page pools chứa một số tài liệu rất thú vị - từ các bảng dịch chuyển đến các bản ghi bảng trang (PTE) và nhật ký truy cập của bộ quản lý bộ nhớ (Mm), chi tiết về Address Space Layout Randomization (ASLR), bảng xử lý quy trình (bảng đối tượng), và các phân bổ cổng Internet. Để giải thích dữ liệu trong các phân bổ này, bạn cần hiểu các cấu trúc và định dạng mà driver sở hữu sử dụng, nhưng việc biết chính xác các mô tả và vị trí cụ thể của các khối trong bộ nhớ sẽ giúp bạn nhanh chóng tăng tốc quá trình nghiên cứu.
+
+## Pool-Scanning Alternatives
+
+
+Bây giờ khi bạn đã nắm vững những ưu điểm và nhược điểm của kỹ thuật pool tag scanning trong phân tích nhớ, chúng ta sẽ kết thúc chương này bằng một cuộc thảo luận nhanh về một số phương pháp thay thế.
+
+### Dispatcher Header Scans
+
+Đối với một số loại đối tượng quản lý của hệ thống như tiến trình (processes), luồng (threads) và mutexes, chúng đều có khả năng đồng bộ hóa. Điều này có nghĩa là các luồng khác có thể đồng bộ hóa với, hoặc chờ đợi, những đối tượng này để thực hiện các hành động như bắt đầu, kết thúc hoặc thực hiện các hành động khác. Để hỗ trợ tính năng này, kernel lưu trữ thông tin về trạng thái hiện tại của đối tượng trong một cấu trúc con được gọi là _DISPATCHER_HEADER và nó xuất hiện ngay tại đầu tiên (offset 0) của các cấu trúc đối tượng quản lý của hệ thống. Quan trọng hơn, cấu trúc này chứa một số giá trị được duy trì nhất quán qua các bản sao bộ nhớ từ một phiên bản cụ thể của Windows, do đó bạn có thể dễ dàng xây dựng một chữ ký (signature) cho từng profile để tìm kiếm các đối tượng này.
+
+>**Lưu ý**<br> Để biết thêm thông tin về việc sử dụng dispatcher headers cho phân tích bộ nhớ, bạn có thể tham khảo bài viết "Searching for Processes and Threads in Microsoft Windows Memory Dumps" của Andreas Schuster tại đường dẫn: http://www.dfrws.org/2006/proceedings/2-Schuster.pdf.
+
+Đầu ra dưới đây là từ một hệ thống Windows XP Service Pack 2 32-bit:
+
+```
+>>> dt("_DISPATCHER_HEADER")
+'_DISPATCHER_HEADER' (16 bytes)
+0x0 : Type          ['unsigned char']
+0x1 : Absolute      ['unsigned char']
+0x2 : Size          ['unsigned char']
+0x3 : Inserted      ['unsigned char']
+0x4 : SignalState   ['long']
+0x8 : WaitListHead  ['_LIST_ENTRY']
+```
+
+Andreas Schuster phát hiện rằng các trường Absolute và Inserted luôn luôn là 0 trên các hệ thống Windows 2000, XP và 2003. Các trường Type và Size được mã hóa cứng, chỉ định loại đối tượng và kích thước của đối tượng tương ứng. Ví dụ, trên máy tính Windows XP 32-bit, trường Type là 3 cho các tiến trình (_EPROCESS), và trường Size là 0x1b, tạo thành một chữ ký 4 byte là \x03\x00\x1b\x00. Tương tự như pool tag, bạn có thể quét qua bộ nhớ để tìm các trường hợp của chữ ký này để tìm tất cả các đối tượng _EPROCESS. Đây là cách mà một trong những công cụ phân tích bộ nhớ rất sớm gọi là PTFinder đã hoạt động: http:// computer.forensikblog.de/en/2007/11/ptfinder-version-0305.html.
+Một trong những nhược điểm của quét tiêu đề bộ điều phối là nó chỉ giúp tìm các đối tượng có khả năng đồng bộ hóa. Ví dụ, các đối tượng file không thể đồng bộ hóa, do đó chúng không có _DISPATCHER_HEADER được nhúng. Do đó, bạn không thể tìm các trường hợp của đối tượng _FILE_OBJECT bằng phương pháp này. Hơn nữa, bắt đầu từ Windows 2003, cấu trúc _DISPATCHER_HEADER được mở rộng thành 10 thành viên thay vì chỉ có 6; và phiên bản Windows 7 có gần 30 thành viên. Với quá nhiều thành viên như vậy, sự không chắc chắn trong việc duy trì tính nhất quán của chúng khiến việc xây dựng một chữ ký trở nên khó khăn.
+
+>**LƯU Ý:**<br> Một ví dụ về trình quét tiêu đề bộ điều phối để tìm các tiến trình có thể được tìm thấy trong tệp contrib/plugins/pspdispscan.py trong mã nguồn của Volatility. Nó chỉ được cung cấp như một chứng cớ về khả năng và hiện tại chỉ hoạt động với các tệp mẫu Windows XP 32 bit.
+
+### Robust Signature Scans
+
+Cả hai tiêu đề pool và tiêu đề bộ điều phối không thiết yếu đối với hệ điều hành, điều này có nghĩa là chúng có thể bị thay đổi độc hại để đánh bại quá trình quét dựa trên chữ ký mà không gây ra sự không ổn định của hệ thống. Tuy nhiên, có một cách tiếp cận khác để tìm các đối tượng trong các bản ghi nhớ mà chống lại các sự thay đổi như vậy. Brendan Dolan-Gavitt và các đồng nghiệp đã viết một bài báo có tựa đề Robust Signatures for Kernel Data Structures (http://www.cc.gatech.edu/~brendan/ccs09_siggen.pdf) mô tả phương pháp này. Họ đã thử nghiệm tác động lên hệ điều hành bằng cách thay đổi các thành viên của _EPROCESS và ghi lại những thành viên nào gây ra sự cố của hệ thống. Những thành viên này được gọi là cần thiết. Sau đó, một chữ ký được xây dựng dựa chỉ trên các thành viên cần thiết này.
+
+>**Lưu ý**<br> rằng công cụ kiểm thử bằng cách sử dụng Volatility ở chế độ ghi để truy cập vào bộ nhớ vật lý từ các máy ảo Xen và VMware Server.
+
+Một plugin Volatility ví dụ có tên là psscan3 (http://www.cc.gatech.edu/~brendan/volatility/dl/psscan3.py) đã được phát triển và phân phối cùng với bài báo. Danh sách sau cung cấp tóm tắt về những gì Dolan-Gavitt và đồng nghiệp của ông coi là một chữ ký mạnh mẽ cho các đối tượng _EPROCESS.
+
+- Căn chỉnh DTB: Base bảng thư mục (_DirectoryTableBase) phải được căn chỉnh trên ranh giới 32-bit.
+
+- Cờ quyền truy cập được cấp: Thành viên GrantedAccess phải có các cờ 0x1F07FB được đặt.
+
+- Độ dài con trỏ: Các thành viên VadRoot, ObjectTable, ThreadListHead và ReadyListHead phải chứa các địa chỉ chế độ kernel hợp lệ.
+
+- Danh sách bộ nhớ làm việc: Thành viên VmWorkingSetList không chỉ phải trỏ vào chế độ kernel mà còn cần phải lớn hơn 0xC0000000 (đối với các hệ thống 32-bit).
+
+- Đếm khóa: Đếm khóa WorkingSetLock và AddressCreationLock phải bằng 1.
+
+Bất kỳ cố gắng sửa đổi các thành viên này thành các giá trị bên ngoài giá trị đã chỉ định sẽ gây ra lỗi màn hình xanh. Do đó, trình quét của bạn trở nên mạnh mẽ hơn đối với những thay đổi tiềm năng mà một kẻ tấn công (hoặc mẫu mã độc) có thể thử làm. Tuy nhiên, kỹ thuật này yêu cầu một khung kiểm tra lỗi và thời gian lớn để xác thực và kiểm tra các kết quả. Vì lý do này, plugin psscan3 hiện không được bao gồm trong phiên bản mới nhất của Volatility - nhưng bạn có thể tải xuống và sử dụng nó với Volatility 1.3.
+
+## Tổng quan
+
+Trình quản lý đối tượng của Windows đóng một vai trò quan trọng trong việc tạo và xóa nhiều đối tượng quan trọng, mà các nhà điều tra dựa vào để phân tích (quy trình, tệp, khóa registry và nhiều hơn nữa). Tuy nhiên, tính đáng tin cậy của bằng chứng bạn thấy phụ thuộc vào cách mà framework dò tìm và xác thực dữ liệu trong bộ nhớ. Mặc dù quét thông qua bộ nhớ vật lý (bao gồm cả các khối trống) là mạnh mẽ, nhưng nó cũng rất dễ bị hỏng vì thường dựa trên các chữ ký không quan trọng. Để trở thành một nhà phân tích hiệu quả, bạn cần hiểu cách các kỹ thuật quét hoạt động và do đó, cách mà các kẻ tấn công có thể né tránh các công cụ điều tra bộ nhớ. Hơn nữa, bạn nên quen với việc xác nhận nhiều nguồn bằng chứng trước khi rút ra kết luận.

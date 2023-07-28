@@ -418,3 +418,22 @@ Một ví dụ về việc chạy plugin psscan với tất cả các tùy chọ
 
 ![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-28%20204252.png)
 
+Kết quả hiển thị hai quá trình có thời gian kết thúc, điều này có nghĩa là chúng đã kết thúc. Cả hai quá trình ipconfig.exe và ping.exe chỉ thực thi trong một vài giây (hoặc ít hơn), vì vậy điều này là hợp lý khi chúng chỉ chạy trong một khoảng thời gian ngắn sau khi bắt đầu. Nếu bạn duyệt danh sách quá trình hoạt động của hệ điều hành, bạn sẽ không thấy bất kỳ quá trình nào vì cả hai đã kết thúc trước khi dump bộ nhớ được thực hiện. Tuy nhiên, bằng cách sử dụng kỹ thuật quét thẻ pool trong không gian vật lý, chúng ta đã tìm thấy dấu vết có thể hỗ trợ lý thuyết của bạn về việc một kẻ tấn công trên hệ thống đã tiến hành khảo sát mạng bằng hai tiện ích trên. 
+
+Ví dụ này chỉ làm nổi bật một trong những trường hợp sử dụng phổ biến nhất của việc quét thẻ pool. Các chương sau sẽ tái khám phá chủ đề này và sử dụng quét thẻ pool để phát hiện sự hiện diện của rootkit cấp kernel.
+
+## Limitations of Pool Scanning
+
+Phương pháp quét thẻ pool cung cấp một cách mạnh mẽ để tìm kiếm các đối tượng mà không cần can thiệp hoặc hỗ trợ từ hệ điều hành mục tiêu. Tuy nhiên, nó cũng có một số hạn chế, mà bạn nên hiểu rõ trước khi rút ra kết luận dựa trên kết quả của các plugin quét thẻ pool.
+
+### Non-malicious Limitations
+
+Dưới đây là danh sách những hạn chế không phải do sự can thiệp xâm phạm của bằng chứng.
+
+- Bộ nhớ pool không được gắn thẻ: ExAllocatePoolWithTag là cách được đề xuất bởi Microsoft để các trình điều khiển và các thành phần chế độ kernel cấp phát bộ nhớ, nhưng không phải là tùy chọn duy nhất. Một trình điều khiển cũng có thể sử dụng ExAllocatePool, một API đang trong quá trình bị loại bỏ, nhưng vẫn có sẵn trên nhiều phiên bản Windows. API này cấp phát bộ nhớ nhưng không có thẻ, khiến bạn không có cách dễ dàng để theo dõi hoặc quét các phân bổ này.
+
+- Các kết quả giả vờ: Vì phương pháp quét thẻ pool dựa essentially dựa trên phù hợp mẫu và heuristic, việc có kết quả giả vờ là khả năng có thể xảy ra. Điều này đặc biệt đúng khi quét không gian địa chỉ vật lý vì nó bao gồm dữ liệu mà hệ điều hành đã loại bỏ. Để giải quyết các kết quả giả vờ, thường bạn cần xem xét ngữ cảnh của đối tượng (nơi nó được tìm thấy), xem giá trị của các thành viên có hợp lý (điều này có thể thay đổi cho từng đối tượng) và xem xét liệu bạn có tìm thấy đối tượng bằng các phương pháp khác như danh sách thay thế.
+
+- Các phân bổ lớn: Kỹ thuật quét thẻ pool không hoạt động với các phân bổ lớn hơn 4096 byte (xem phần "Big Page Pool" sắp tới). May mắn thay, tất cả các đối tượng thực thi đều nhỏ hơn kích thước này.
+
+### Malicious Limitations (Anti-Forensics)

@@ -102,3 +102,43 @@ Mặc dù danh sách này không đầy đủ, nhưng nó cung cấp đủ thôn
 
 ### Analyzing Process Activity
 
+Volatility cung cấp một số lệnh bạn có thể sử dụng để trích xuất thông tin về các tiến trình:
+
+- pslist: Tìm kiếm và duyệt qua danh sách hai chiều của các tiến trình và hiển thị một tóm tắt dữ liệu. Phương pháp này thường không thể hiển thị các tiến trình đã kết thúc hoặc được ẩn.
+
+- pstree: Lấy đầu ra từ lệnh pslist và định dạng nó thành dạng cây để bạn có thể dễ dàng nhìn thấy mối quan hệ cha mẹ và con cái.
+
+- psscan: Quét các đối tượng _EPROCESS thay vì dựa vào danh sách liên kết. Plugin này cũng có thể tìm thấy các tiến trình đã kết thúc và không liên kết (ẩn).
+
+- psxview: Xác định các tiến trình bằng cách sử dụng các danh sách tiến trình thay thế, từ đó bạn có thể so sánh chéo các nguồn thông tin khác nhau và phát hiện ra những khác biệt đáng ngờ.
+
+Một ví dụ về câu lệnh pslist:
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-29%20230017.png)
+
+Cột đầu tiên trong đầu ra, Offset(V), hiển thị địa chỉ ảo (trong bộ nhớ kernel) của cấu trúc _EPROCESS. Di chuyển sang phải, bạn sẽ thấy tên tiến trình (hoặc ít nhất là 16 ký tự đầu tiên của nó), PID, PID của tiến trình cha, số luồng, số bản mô tả tập tin (handles), ID phiên và thời gian tạo. Bằng cách nhìn vào dữ liệu này, bạn có thể thu thập một số thông tin thú vị:
+
+- Có ba trình duyệt đang chạy (hai phiên bản của IEXPLORE.EXE và một firefox.exe), một ứng dụng email (thunderbird.exe) và Adobe Reader (AcroRd32.exe). Do đó, có khả năng cao máy tính này là một máy trạm hoặc máy tính cá nhân, chứ không phải là máy chủ. Ngoài ra, nếu bạn nghi ngờ một vector tấn công từ phía người dùng (như một cuộc tải xuống không rõ nguồn gốc hoặc lợi dụng lừa đảo), thì nên khai thác các tiến trình này để thu thập dữ liệu liên quan đến sự cố vì có khả năng cao một hoặc nhiều tiến trình này liên quan đến sự việc.
+
+- Tất cả các tiến trình, kể cả các tiến trình quan trọng cho hệ thống, đang chạy trong phiên 0, điều này cho thấy đây là một máy tính cũ (Windows XP hoặc 2003) (tức là trước cách ly phiên 0) và chỉ có một người dùng đang đăng nhập vào thời điểm này.
+
+- Hai trong số các tiến trình AcroRd32.exe có 0 luồng và con trỏ bảng bản mô tả tập tin không hợp lệ (được chỉ ra bởi các đường nét đứt). Nếu cột thời gian thoát được hiển thị (chúng tôi cắt ngắn để tránh xuống dòng), bạn sẽ thấy rằng hai tiến trình này đã thực sự đã chấm dứt. Chúng "bị kẹt" trong danh sách tiến trình hoạt động vì một tiến trình khác đang có một bản mô tả tập tin mở đối với chúng (xem The Mis-leading Active in PsActiveProcessHead: http://mnin.blogspot.com/2011/03/mis-leading-active-in.html).
+
+- Tiến trình có PID 2280 (a[1].php) có phần mở rộng không hợp lệ cho các tập tin thực thi - nó cho rằng là một tập tin PHP. Hơn nữa, dựa vào thời gian tạo của nó, nó có mối quan hệ thời gian với một số tiến trình khác bắt đầu trong cùng một phút (14:19:XX), bao gồm một cửa sổ lệnh (cmd.exe).
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-29%20231830.png)
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-29%20232003.png)
+
+Khi xem các tiến trình dưới dạng cây, việc xác định các sự kiện có thể xảy ra trong quá trình tấn công dễ dàng hơn. Bạn có thể thấy rằng firefox.exe (PID 180) được khởi động bởi explorer.exe (PID 1300). Điều này là bình thường - mỗi khi bạn khởi động một ứng dụng thông qua menu Start hoặc bằng cách nhấp đôi vào biểu tượng trên màn hình, quá trình cha là Windows Explorer. Cũng khá phổ biến là trình duyệt tạo ra các phiên bản của Adobe Reader (AcroRd32.exe) để hiển thị tài liệu PDF được truy cập qua trang web. Tình huống trở nên thú vị khi bạn thấy rằng AcroRd32.exe đã kích hoạt một cửa sổ lệnh (cmd.exe), từ đó sau đó đã khởi động a[1].php. 
+
+Lúc này, bạn có thể giả định rằng một trang web đã được truy cập bằng Firefox khiến trình duyệt mở một tập tin PDF độc hại. Một lỗ hổng bị khai thác trong AcroRd32.exe cho phép kẻ tấn công sử dụng cửa sổ lệnh để tiến xa hơn trong việc cài đặt mã độc bổ sung trên hệ thống.
+
+### Process Tree Visualizations
+
+Một cách khác để hiển thị mối quan hệ cha mẹ giữa các tiến trình là sử dụng lệnh psscan với trình biên dịch đồ chấm (dot graph renderer) (--output=dot). Chức năng này dựa trên công cụ PTFinder của Andreas Schuster (http://www.dfrws.org/2006/proceedings/2-Schuster-pres.pdf), cũng tạo ra biểu đồ cho phân tích hình ảnh. Vì góc nhìn này của các tiến trình dựa trên quét pool thông qua không gian địa chỉ vật lý, nó cũng tích hợp các tiến trình đã kết thúc và ẩn vào biểu đồ. Bạn có thể tạo ra một biểu đồ như sau:
+
+```
+ python vol.py psscan –f memory.bin --profile=Win7SP1x64
+    --output=dot
+    --output-file=processes.dot
+```

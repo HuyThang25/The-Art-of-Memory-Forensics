@@ -336,6 +336,194 @@ Như đã đề cập trước đó, API của Windows (AdjustTokenPrivileges) k
 
 #### Attack Simulation with Volshell
 
+Cuộc tấn công Cesar dựa trên phương pháp DKOM (Direct Kernel Object Modification). Anh ấy định vị cấu trúc _SEP_TOKEN_PRIVILEGES của tiến trình mục tiêu và thiết lập thành viên Enabled 64-bit thành 0xFFFFFFFFFFFFFFFF. Điều này hiệu quả kích hoạt tất cả các đặc quyền có thể có. Anh ấy không cập nhật thành viên Present, do đó nó sẽ chỉ phản ánh các đặc quyền đã có trước cuộc tấn công. Để mô phỏng các bước này, bạn có thể sử dụng Volatility ở chế độ ghi để sửa đổi bộ nhớ của một máy ảo. Khi bạn hoàn thành, tiếp tục chạy máy ảo và các thay đổi sẽ có hiệu lực. Điều này dễ dàng hơn việc viết một trình điều khiển kernel - đặc biệt là khi chỉ dùng cho mục đích kiểm tra.
+
+```
+$ python vol.py -f VistaSP0x64.vmem --profile=VistaSP2x64 volshell --write
+Volatility Foundation Volatility Framework 2.4
+Write support requested. Please type "Yes, I want to enable write support"
+Yes, I want to enable write support
+Current context: process System, pid=4, ppid=0 DTB=0x124000
+To get help, type 'hh()'
+>>> cc(pid = 1824)
+Current context: process explorer.exe, pid=1824, ppid=1668 DTB=0x918d000
+```
+
+Bây giờ khi bạn đang ở trong ngữ cảnh của tiến trình mục tiêu, hãy lấy con trỏ trỏ tới cấu trúc _TOKEN của nó. Sau đó, bạn có thể in các số 64-bit dưới dạng chuỗi nhị phân, như sau:
+
+```
+>>> token = proc().get_token()
+>>> bin(token.Privileges.Present)
+'0b11000000010100010000000000000000000'
+>>> bin(token.Privileges.Enabled)
+'0b100000000000000000000000'
+```
+
+Các lệnh tiếp theo sẽ thiết lập tất cả các bit trong thành viên Enabled và in lại các giá trị để xác nhận rằng nó đã được cập nhật thành công. Sau đó, bạn có thể thoát khỏi shell.
+
+```
+>>> token.Privileges.Enabled = 0xFFFFFFFFFFFFFFFF
+>>> bin(token.Privileges.Present)
+'0b11000000010100010000000000000000000'
+>>> bin(token.Privileges.Enabled)
+'0b1111111111111111111111111111111111111111111111111111111111111111'
+>>> quit()
+```
+
+Hình 6-10 cho thấy cấu trúc dữ liệu kernel sau khi được can thiệp.
+
+>**Ghi chú:**<br> Hình 6-10 không được vẽ theo tỷ lệ (các thành viên hiển thị thực tế không có chiều rộng 64 bit). Nếu bạn muốn xem các ánh xạ vị trí bit chính xác, hãy xem trong tệp nguồn volatility/plugins/privileges.py.
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-30%20191156.png)
+
+Dựa trên đầu ra volshell trước đó và Hình 6-10, chỉ có năm bit được thiết lập trong thành viên Present, điều này có nghĩa là tối đa chỉ có năm đặc quyền được báo cáo bởi các công cụ chạy trên hệ thống trực tiếp. Hình 6-11 cho thấy cách điều này xuất hiện trong Process Explorer:
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-30%20191357.png)
+
+Như dự đoán, điều đó cho thấy chỉ có năm đặc quyền được kích hoạt.
+
+#### Revealing the Truth
+
+Tuy nhiên, nếu bạn phân tích bộ nhớ VM bằng cách sử dụng plugin "privs", mà không tuân theo cùng một logic như Windows API, bạn sẽ thấy rằng tất cả các đặc quyền đều được kích hoạt, nhưng một số trong số chúng thực sự không tồn tại (điều này không bao giờ nên xảy ra). Như vậy, explorer.exe có thể thực hiện bất kỳ nhiệm vụ nào mà nó mong muốn, trong khi các công cụ trực tiếp trên hệ thống tiếp tục báo cáo rằng những khả năng đó không tồn tại.
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-30%20191546.png)
 
 
+Một điều cần lưu ý về cuộc tấn công của Cesar là bạn cần truy cập cấp kernel trước tiên để sửa đổi cấu trúc _SEP_TOKEN_PRIVILEGES. Tuy nhiên, mục đích của cuộc tấn công là kéo dài quyền truy cập vào hệ thống bằng cách lừa các công cụ trực tiếp và những người phản ứng sự cố, chứ không phải để khai thác một lỗ hổng tăng cường đặc quyền.
 
+## Process Handles
+
+Một handle là một tham chiếu tới một phiên bản đang mở của một đối tượng kernel, chẳng hạn như một tập tin, một khóa registry, một mutex, một tiến trình hoặc một luồng. Như đã thảo luận trong Chương 5, có gần 40 loại đối tượng kernel khác nhau. Bằng cách liệt kê và phân tích các đối tượng cụ thể mà một tiến trình đang truy cập vào thời điểm bắt được bộ nhớ, ta có thể đưa ra một số kết luận có liên quan đến pháp y—chẳng hạn như tiến trình nào đang đọc hoặc ghi một tập tin cụ thể, tiến trình nào đã truy cập vào một trong các khóa registry run, và tiến trình nào đã ánh xạ hệ thống tập tin từ xa.
+
+### Lifetime of a Handle
+
+Trước khi một tiến trình có thể truy cập một đối tượng, tiến trình đó trước tiên mở một handle tới đối tượng bằng cách gọi một API như CreateFile, RegOpenKeyEx, hoặc CreateMutex. Các API này trả về một kiểu dữ liệu đặc biệt của Windows được gọi là HANDLE, đó chỉ đơn giản là một chỉ mục vào bảng handle cụ thể của tiến trình. Ví dụ, khi bạn gọi CreateFile, một con trỏ tới _FILE_OBJECT tương ứng trong bộ nhớ kernel được đặt vào khe trống đầu tiên trong bảng handle của tiến trình gọi, và chỉ số tương ứng (như 0x40) được trả về. Ngoài ra, số lượng handle của đối tượng được tăng thêm một. Tiến trình gọi sau đó chuyển giá trị HANDLE cho các hàm thực hiện các hoạt động trên đối tượng, chẳng hạn như đọc, ghi, chờ đợi hoặc xóa. Do đó, các API như ReadFile và WriteFile hoạt động theo cách sau đây:
+1. Tìm địa chỉ cơ sở của bảng handle của tiến trình gọi.
+2. Đi tới chỉ số 0x40.
+3. Truy xuất con trỏ _FILE_OBJECT.
+4. Tiến hành thực hiện hoạt động được yêu cầu.
+
+Khi một tiến trình hoàn thành việc sử dụng một đối tượng, nó nên đóng handle bằng cách gọi hàm tương ứng (như CloseHandle, RegCloseHandle, v.v.). Các API này giảm giá trị của số lượng handle của đối tượng và loại bỏ con trỏ tới đối tượng khỏi bảng handle của tiến trình. Tại thời điểm này, chỉ mục bảng handle có thể được sử dụng lại để lưu trữ một loại đối tượng khác. Tuy nhiên, đối tượng thực tế (ví dụ: _FILE_OBJECT) sẽ không được giải phóng hoặc ghi đè cho đến khi số lượng handle giảm về số không, điều này ngăn chặn một tiến trình xóa một đối tượng đang được sử dụng bởi một tiến trình khác.
+
+>**Ghi chú:**<br> Mô hình bảng handle được thiết kế vừa tiện lợi vừa an toàn. Nó tiện lợi vì bạn không cần phải truyền đầy đủ tên hoặc đường dẫn của một đối tượng mỗi khi bạn thực hiện một hoạt động - chỉ khi bạn mở hoặc tạo đối tượng ban đầu. Với mục đích bảo mật, mô hình cũng giúp ẩn các địa chỉ của các đối tượng trong bộ nhớ kernel. Bởi vì tiến trình ở chế độ người dùng không bao giờ nên truy cập trực tiếp vào các đối tượng kernel, không có lý do gì mà họ cần các con trỏ đó. Hơn nữa, mô hình cung cấp một cách tập trung cho kernel giám sát truy cập vào các đối tượng kernel, từ đó cung cấp cơ hội để áp dụng bảo mật dựa trên các SID và đặc quyền.
+
+### Reference Counts and Kernel Handles
+
+Cho đến nay trong phần này, chúng ta đã đề cập đến các tiến trình như những thực thể tương tác với các đối tượng thông qua handle. Tuy nhiên, các module kernel, hoặc các luồng trong chế độ kernel, cũng có thể gọi các API kernel tương đương (ví dụ: NtCreateFile, NtReadFile, NtCreateMutex) theo cách tương tự. Trong trường hợp này, các handle được cấp phát từ bảng handle của tiến trình System (PID 4). Do đó, khi bạn xem các handle của tiến trình System, bạn thực sự đang xem tất cả các tài nguyên đang mở được yêu cầu bởi các module kernel.
+
+Ngoài ra, code trong kernel có thể truy cập trực tiếp vào các đối tượng hiện có, mà không cần mở handle trước tiên. Ví dụ, miễn là địa chỉ của đối tượng được biết đến, bạn có thể sử dụng API ObReferenceObjectByPointer. API này tăng số lượng tham chiếu, thay vì số lượng handle, do đó, hệ điều hành sẽ không xóa đối tượng trong khi vẫn có tham chiếu đến nó. Tuy nhiên, việc gọi ObDereferenceObject được khuyến nghị, nếu không, các đối tượng có thể tồn tại mà không cần thiết (điều này được gọi là rò rỉ handle hoặc tham chiếu). Mặc dù rò rỉ là xấu cho hiệu suất, nhưng lại là lợi ích cho việc điều tra số học - giống như một kẻ tấn công không thể dọn dẹp hiện trường tội phạm.
+
+Trong nhiều trường hợp, ngay cả khi các handle được đóng và các tham chiếu được giải phóng, vẫn có khả năng bạn có thể tìm thấy các đối tượng bằng cách quét không gian địa chỉ vật lý, như đã mô tả trong Chương 5. Tất nhiên, vào thời điểm đó, chúng sẽ không được liên kết với bảng handle của một tiến trình, nhưng sự hiện diện của chúng trong RAM vẫn cung cấp gợi ý cho cuộc điều tra. Tương tự, sau khi một tiến trình chấm dứt, bảng handle của nó sẽ bị hủy, nhưng điều đó không có nghĩa là tất cả các đối tượng được tạo bởi tiến trình đó đều bị hủy cùng một lúc.
+
+**Mục tiêu**
+
+- Nội dung bảng handle: Hiểu sâu về cơ chế xử lý bảng handle và handle có thể giúp bạn hiểu rõ hơn về các đối tượng và dấu vết mà bạn tìm thấy trong bộ nhớ.
+
+- Truy xuất đối tượng cụ thể: Dựa vào một chỉ báo như tên tập tin, đường dẫn khóa registry, mutex hoặc đối tượng khác - bạn có thể truy xuất lại tiến trình, hoặc các tiến trình có trách nhiệm tạo hoặc truy cập vào đối tượng đó.
+
+- Cuộc điều tra mở rộng: Nếu bạn không có danh sách cụ thể của các chỉ báo ban đầu, bạn vẫn có thể thu thập một lượng kiến thức lớn về hành vi và ý định của một tiến trình không xác định bằng cách phân tích nội dung của bảng handle của nó.
+
+- Phát hiện sự tồn tại của registry: Học cách phân tích các handle registry mở để xác định các khóa mà một tiến trình sử dụng để lưu trữ cấu hình hoặc dữ liệu bền vững.
+
+- Xác định ổ đĩa được ánh xạ từ xa: Kẻ thù thường tìm kiếm địa chỉ IP và tên của các máy tính khác trong nhóm làm việc hoặc miền, sau đó cố gắng ánh xạ chúng để truy cập từ xa để đọc hoặc ghi. Bạn sẽ học cách tìm tín hiệu về chính xác hệ thống và đường dẫn nào đã được truy cập bằng cách xem trong bảng handle.
+
+### Handle Table Internals
+
+Mỗi thành viên _EPROCESS.ObjectTable của một tiến trình trỏ đến một bảng handle (_HANDLE_TABLE). Cấu trúc này có một trường TableCode có hai mục đích quan trọng: Nó xác định số cấp trong bảng và trỏ tới địa chỉ cơ sở của cấp đầu tiên. Tất cả các tiến trình đều bắt đầu với một bảng đơn cấp, như được thể hiện trong Hình 6-12. Kích thước bảng là một trang (4096 byte), và cấu trúc này cho phép tối đa 512 handle trên hệ thống 32 bit hoặc 256 handle trên hệ thống 64 bit. Các chỉ mục trong bảng chứa các cấu trúc _HANDLE_TABLE_ENTRY nếu chúng đang được sử dụng; nếu không, chúng được đặt giá trị bằng không.
+
+Các mục trong bảng handle chứa một thành viên Object trỏ tới _OBJECT_HEADER của đối tượng tương ứng. Bằng cách điều hướng qua các trường này, bạn có thể xác định cả tên đối tượng và thân đối tượng (ví dụ: _FILE_OBJECT, _EPROCESS).
+
+Một số tiến trình yêu cầu nhiều handle mở hơn mức cho phép của bảng đơn cấp. Do đó, Windows có thể mở rộng theo yêu cầu thành một hệ thống liên quan đến tối đa ba cấp. Ví dụ, trong một bảng handle hai cấp, cấp đầu tiên vẫn là một khối bộ nhớ 4096 byte, nhưng nó được chia thành 1024 khe (32 bit) hoặc 512 khe (64 bit). Mỗi khe lưu trữ một con trỏ tới một mảng các cấu trúc _HANDLE_TABLE_ENTRY. Như vậy, trên nền tảng 32 bit, bảng handle hai cấp có thể hỗ trợ tối đa 1024 * 512 = 524.288 handle.
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-30%20200854.png)
+
+Tương tự, một bảng ba cấp trên hệ thống 32 bit trong lý thuyết có thể hỗ trợ tới 1024 * 1024 * 512 = 536,870,912 handle. Tuy nhiên, như đã miêu tả trong bài viết "Đẩy giới hạn của Windows: Handles" (https://blogs.technet.com/b/markrussinovich/archive/2009/09/29/3283844.aspx), các giới hạn thực tế thường ít hơn rất nhiều. Đầu tiên, kernel thực hiện giới hạn cứng xấp xỉ 16 triệu handle. Ngoài ra, bất kỳ tiến trình nào cần nhiều hơn vài nghìn handle mở cùng lúc có thể đang gặp sự rò rỉ bảng handle (tức là quên đóng các handle của nó). Do đó, giới hạn tối đa cứng được sử dụng như một dấu hiệu sớm cho các ứng dụng viết không tốt.
+
+**Cấu trúc Dữ liệu**
+
+Các kết quả dưới đây thể hiện cấu trúc bảng handle và mục nhập bảng handle cho hệ thống Windows 7 64-bit:
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-30%20201106.png)
+
+**Những điểm chính về cấu trúc _HANDLE_TABLE là như sau:**
+
+- TableCode: Giá trị này cho bạn biết số cấp trong bảng và trỏ tới địa chỉ của bảng cấp cao nhất. Mục đích kép này được thực hiện bằng cách sử dụng một bit mask bằng bảy (7). Ví dụ, để lấy số bảng, bạn có thể tính toán TableCode & 7; và để lấy địa chỉ, bạn có thể tính toán TableCode & ~7.
+
+- QuotaProcess: Con trỏ tới tiến trình mà bảng handle thuộc về. Nó có thể hữu ích nếu bạn tìm thấy bảng handle bằng cách sử dụng phương pháp quét bể bộ nhớ được miêu tả trong Chương 5 thay vì liệt kê các tiến trình và theo dõi con trỏ ObjectTable của chúng.
+
+- HandleTableList: Một danh sách liên kết các bảng handle của tiến trình trong bộ nhớ kernel. Bạn có thể sử dụng nó để xác định các bảng handle khác - có thể thậm chí là cho các tiến trình đã bị tách ra khỏi danh sách tiến trình.
+
+- HandleCount: Tổng số mục bảng handle đang được sử dụng bởi tiến trình. Trường này đã bị loại bỏ bắt đầu từ Windows 8 và Server 2012.
+
+Những điểm chính về cấu trúc _HANDLE_TABLE_ENTRY là như sau:
+
+- Object: Thành viên này trỏ tới _OBJECT_HEADER của đối tượng tương ứng. _EX_FAST_REF là một kiểu dữ liệu đặc biệt kết hợp thông tin đếm tham chiếu vào các bit ít quan trọng nhất của con trỏ.
+
+- GrantedAccess: Một bộ lọc bit chỉ định quyền truy cập được cấp cho đối tượng mà tiến trình sở hữu (đọc, ghi, xóa, đồng bộ hóa, v.v.).
+
+## Enumerating Handles in Memory
+
+Plugin handles của Volatility tạo ra kết quả bằng cách duyệt các cấu trúc dữ liệu bảng handle. Sử dụng plugin này mà không có bất kỳ tùy chọn nào sẽ tạo ra kết quả chi tiết nhất: tất cả các handle cho tất cả các loại đối tượng trong tất cả các tiến trình. Do đó, bạn nên tìm hiểu về một số tùy chọn lọc:
+
+- Lọc theo ID tiến trình: Bạn có thể chuyển một hoặc nhiều ID tiến trình (phân cách bằng dấu phẩy) vào tùy chọn -p/--pid.
+
+- Lọc theo vị trí tiến trình: Bạn có thể cung cấp vị trí vật lý của một cấu trúc _EPROCESS vào tùy chọn -o/--offset.
+
+- Lọc theo loại đối tượng: Nếu bạn chỉ quan tâm đến một loại đối tượng cụ thể, chẳng hạn như tập tin hoặc khóa registry, bạn có thể chỉ định tên phù hợp cho tùy chọn -t/--object-type. Xem Chương 5 hoặc nhập !object \ObjectTypes vào Windbg để xem danh sách đầy đủ các loại đối tượng.
+
+- Lọc theo tên: Không phải tất cả các đối tượng đều có tên. Đối tượng không có tên thì rõ ràng vô dụng khi tìm kiếm các chỉ báo theo tên, vì vậy một cách để giảm tiếng ồn là sử dụng tùy chọn --silent, giúp ẩn các handle đến các đối tượng không có tên.
+
+### Finding Zeus Indicators
+
+Kết quả đầu ra sau đây thể hiện một số handle đầu tiên từ PID 632 (winlogon.exe). Bộ nhớ được chụp từ một hệ thống XP 32-bit cũ bị nhiễm Zeus (https://code.google.com/p/malwarecookbook/source/browse/trunk/17/1/zeus.vmem.zip). Tuy nhiên, rất khó để nhận ra sự nhiễm trùng vì tiến trình có khoảng 550 handle mở (đã cắt bớt để rút ngắn) tới các loại đối tượng khác nhau - và bạn có thể không nhận ra ngay tất cả chúng.
+
+>**Lưu ý:**<br> Công thức 9-5 trong Sách Hướng dẫn viên Phân tích Mã độc bao gồm mã nguồn cho một chương trình C so sánh các handle qua tất cả các tiến trình trên hệ thống để kiểm tra hiệu ứng của việc chèn mã vào. Mã nguồn này được dựa trên cùng một API (NtQuerySystemInformation) mà hầu hết các công cụ trên hệ thống đang chạy sử dụng để liệt kê các handle. Bạn có thể tìm mã nguồn này tại đây: https://code.google.com/p/malwarecookbook/source/browse/trunk/9/5/HandleDiff-src.zip.
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-30%20201743.png)
+
+Như được thể hiện trong ví dụ tiếp theo, bạn có thể giới hạn tìm kiếm của mình chỉ đến các tập tin và mutex được mở bởi PID 632 và bỏ qua các đối tượng không có tên. Mặc dù bạn vẫn sẽ thấy khoảng 150 mục (trong bộ nhớ chụp cụ thể này), nhưng các tàn tích đã biết trước của Zeus sẽ dễ dàng nhận diện hơn. Ví dụ, bạn thấy các tệp user.ds và local.ds, chứa cấu hình và dữ liệu đã bị đánh cắp. Tệp sdra64.exe trong thư mục system32 là bộ cài đặt ban đầu của Zeus.
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-30%20201831.png)
+
+Bạn cũng có thể nhận thấy một số handle mở tới \Device\Tcp và \Device\Ip. Chúng rõ ràng khác với các handle tới các tệp được tiếp đầu bằng \Device\HarddiskVolume1. Cụ thể, Tcp và Ip không phải là các tệp trên ổ cứng của máy. Điều này đã được mô tả trong Chương 11, nhưng điều bạn đang thấy thực chất là các hiện vật của các socket mạng mà tiến trình tạo ra. Mặc dù socket không phải là tệp, chúng hỗ trợ các thao tác tương tự như mở, đọc, ghi và xóa. Kết quả là, hệ thống handle/descriptor có thể phục vụ cả tệp và socket mạng. 
+
+Trên cùng một đường, các đường ống có tên cũng được biểu diễn dưới dạng các đối tượng tệp. Do đó, nếu phần mã độc tạo một đường ống có tên để giao tiếp giữa các tiến trình hoặc để chuyển hướng đầu ra của một cửa sổ lệnh thủ công vào một tệp, bạn có thể xác định được những tiến trình liên quan đến hoạt động đó, miễn là bạn biết tên của đường ống mà nó tạo. Trong trường hợp này, việc xác định dễ dàng vì tên đường ống mà Zeus sử dụng giống với mutex chuẩn mà nó tạo để đánh dấu sự hiện diện trên hệ thống (_AVIRA_).
+
+### Detecting Registry Persistence
+
+Phần mềm độc hại thường tận dụng cơ chế registry để duy trì tính tồn tại. Để ghi các giá trị liên quan, tiến trình độc hại phải trước tiên mở một handle tới registry key mong muốn. Trong ví dụ tiếp theo, bạn sẽ thấy điều rõ ràng khi phần mã độc chọn một vị trí được biết đến rõ ràng (như khóa Run) và cũng gặp phải hiện tượng rò rỉ handle. Bạn không chỉ nhận ra tên khóa registry mà còn cả việc có nhiều handle mở tới cùng một khóa. Dưới đây là cách đầu ra xuất hiện:
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-30%20202114.png)
+
+Quá trình này có gần 20 handle mở tới khóa RUN (không phải tất cả đều được hiển thị). Điều này cho thấy sự có vấn đề trong mã lệnh khi nó không đóng các handle sau khi mở chúng. Trong trường hợp này, có khả năng là có một vòng lặp thực thi định kỳ để đảm bảo rằng các giá trị bền vững vẫn còn nguyên vẹn (để tránh trường hợp một sản phẩm antivirus hoặc quản trị viên đã xóa chúng). Tất nhiên, những hiện tượng này không luôn luôn rõ ràng, và chỉ vì một handle tới một khóa được mở, điều đó không có nghĩa là quá trình đã thêm các giá trị. Tuy nhiên, bạn luôn có thể xác nhận nghi ngờ của mình bằng cách sử dụng plugin printkey (xem Chương 10) để xem dữ liệu thực tế mà khóa chứa:
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-30%20202235.png)
+
+Dựa vào tên của chúng, hai mục cuối cùng có vẻ đáng ngờ - chúng khiến lanmanwrk.exe và KernelDrv.exe tự động bắt đầu mỗi lần khởi động. Khóa run này là một trong những vị trí duy trì phổ biến nhất, do đó bạn có thể đã kiểm tra ở đây và tìm thấy các mục đáng ngờ. Tuy nhiên, bằng cách sử dụng phương pháp được miêu tả ở đây (qua plugin handles), bạn có thể rõ ràng xác định chính xác tiến trình nào đã tạo các mục này.
+
+### Identifying Remote Mapped Drives
+
+Kẻ tấn công thường sử dụng các lệnh như "net view" và "net use" để khám phá mạng và ánh xạ các ổ đĩa từ xa. Tiếp cận đọc dữ liệu trên máy chủ tập tin SMB của một công ty hoặc có quyền ghi vào các máy trạm hoặc máy chủ khác trong doanh nghiệp có thể dẫn đến việc tiến hành di chuyển bên trong hệ thống thành công. Trong những trường hợp như vậy, máy thực hiện việc tìm hiểu có các kết nối mạng mở đến các hệ thống từ xa, tạo ra các chỉ mục về hoạt động này trong các bảng quản lý xử lý.
+
+Ví dụ dưới đây minh họa cách một kẻ tấn công điều hướng trên mạng để gắn kết hai ổ đĩa từ xa. Họ gắn kết thư mục "Users" trên hệ thống có tên WIN-464MMR8O7GF như ổ P, và chia sẻ C$ của hệ thống có tên LH-7J277PJ9J85I như ổ Q. Nếu không được bảo vệ, kẻ tấn công cũng có thể gắn kết chia sẻ ADMIN$ theo cùng cách. Sau khi các ổ đĩa được ánh xạ, kẻ tấn công thay đổi thư mục làm việc hiện tại của dòng lệnh thành thư mục tài liệu của một người dùng cụ thể.
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-30%20202255.png)
+
+Mẹo để tìm thấy bằng chứng về việc ánh xạ các ổ đĩa từ xa trong bộ nhớ là tìm các handle tệp được tiếp đầu bằng \Device\Mup và \Device\LanmanRedirector. MUP, viết tắt của Multiple Universal Naming Convention (UNC) Provider, là một thành phần chế độ kernel truyền các yêu cầu truy cập vào các tệp từ xa sử dụng tên UNC đến network redirector thích hợp. Trong trường hợp này, LanmanRedirector xử lý giao thức SMB.
+
+Dưới đây là một ví dụ về cách đầu ra của plugin handles trông như thế nào trên máy chủ bước đầu (máy mà kẻ tấn công truy cập ban đầu). Hệ thống này đang chạy phiên bản 64-bit của Vista SP2.
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-30%20202317.png)
+
+Bạn có một số handle thông thường đến \Device\Mup (chúng là bình thường). Các handle in đậm là những handle bạn nên quan tâm vì chúng hiển thị thư mục ổ đĩa cục bộ, tên NetBIOS từ xa và đường dẫn chia sẻ hoặc hệ thống tập tin từ xa. Có hai ID tiến trình khác nhau được hiển thị: 752 và 1544. Trong trường hợp này, 752 là phiên bản của svchost.exe chạy dịch vụ LanmanWorkstation; nó tạo và duy trì kết nối mạng khách đến máy chủ từ xa bằng giao thức SMB. PID 1544 là cửa sổ cmd.exe, và nó có một handle đến C$\Users\Jimmy\Documents là kết quả của kẻ tấn công thay đổi vào thư mục đó.
+
+Một cách khác để phát hiện các chia sẻ được ánh xạ từ xa, có thể kết hợp với phương pháp handles, là kiểm tra các liên kết tượng trưng thông qua plugin symlinkscan. Các đối tượng kernel này có thể được sử dụng để kết hợp một chữ cái ổ đĩa, chẳng hạn như Q hoặc P, với đường dẫn đã chuyển hướng. Ví dụ, đầu ra sẽ trông như sau:
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-30%20202338.png)
+
+
+Một trong những lợi ích của việc kết hợp các phương pháp là với symlinkscan, bạn cũng có được thời gian chính xác khi chia sẻ từ xa đã được gắn kết. Bằng cách tích hợp thông tin này vào dòng thời gian hoặc (tốt hơn hết) trích xuất lịch sử lệnh của kẻ tấn công từ cmd.exe (xem Chương 17), bạn có thể nhanh chóng trả lời nhiều câu hỏi về các hoạt động được thực hiện trên hệ thống nạn nhân hoặc mạng.
+
+## Tổng quát
+
+Các bằng chứng bạn tìm kiếm và thứ tự trong việc tìm kiếm thay đổi tùy thuộc vào từng trường hợp cụ thể. Tuy nhiên, trong kinh nghiệm của chúng tôi, xem danh sách các tiến trình là một điểm khởi đầu hợp lý, vì nó cho bạn cái nhìn tổng quan về loại ứng dụng đang chạy. Trong quá trình phân tích danh sách tiến trình, hãy lưu ý rằng mã độc thường ẩn đi bằng cách giấu mình giữa các tiến trình hệ thống quan trọng hoặc gỡ bỏ một tiến trình ra khỏi danh sách tiến trình của kernel. Nếu bạn không thể xác định chính xác một tiến trình qua tên của nó, hãy sử dụng handles để xác định các tài nguyên hệ thống mà tiến trình đó đang truy cập. Hãy cân nhắc xem tài khoản người dùng mà tiến trình đang chạy có nên được phép thực hiện các hành động đó không. Sau khi có kinh nghiệm với các cuộc điều tra này, bạn có thể xây dựng (hoặc trao đổi) danh sách chỉ báo với các chuyên gia khác trong cộng đồng và tự động hóa quy trình để tiết kiệm thời gian trong tương lai.

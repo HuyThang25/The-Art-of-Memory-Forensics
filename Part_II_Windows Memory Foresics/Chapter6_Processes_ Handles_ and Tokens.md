@@ -213,5 +213,129 @@ Như được thể hiện trong hình, chỉ có tiến trình 1_doc_RCData_61.
 
 ## Process Tokens
 
+Một token của tiến trình mô tả bối cảnh bảo mật của nó. Bối cảnh này bao gồm các định danh bảo mật (SIDs) của người dùng hoặc nhóm mà tiến trình đang chạy và các đặc quyền khác nhau (nhiệm vụ cụ thể) mà nó được phép thực hiện. Khi kernel cần quyết định liệu một tiến trình có thể truy cập một đối tượng hoặc gọi một API cụ thể không, nó sẽ tham khảo dữ liệu trong token của tiến trình. Kết quả là, cấu trúc này quy định nhiều điều khiển liên quan đến bảo mật liên quan đến các tiến trình. Phần này mô tả cách tận dụng token để bổ sung cho quá trình điều tra của bạn.
+
+**Phân tích mục tiêu**
+
+Các mục tiêu của bạn là như sau:
+
+- Ánh xạ SIDs thành tên người dùng: Token của một tiến trình chứa giá trị SID dưới dạng số, bạn có thể dịch chúng thành chuỗi và sau đó tìm tên người dùng hoặc nhóm tương ứng. Điều này cuối cùng cho phép bạn xác định tài khoản người dùng chính mà một tiến trình đang chạy dưới đó.
+
+- Phát hiện chuyển động ngang: Khi các kỹ thuật hack như pass-the-hash thành công, chúng để lại dấu vết rõ ràng trong token của một tiến trình. Cụ thể, bạn thấy bối cảnh bảo mật của tiến trình chuyển sang tài khoản Domain Admin hoặc Enterprise Admin.
+
+- Xem xét hành vi tiến trình: Một đặc quyền (được thảo luận sau trong chương) là quyền thực hiện một nhiệm vụ cụ thể. Nếu một tiến trình có kế hoạch thực hiện một nhiệm vụ, trước tiên nó phải đảm bảo rằng đặc quyền đó tồn tại và đã được kích hoạt trong token của nó. Do đó, việc phân tích hậu quả sau này về các đặc quyền mà một tiến trình đã thu thập có thể cung cấp gợi ý về những gì tiến trình đã làm (hoặc đã dự định làm).
+
+- Phát hiện leo thang đặc quyền: Một số cuộc tấn công đã chứng minh rằng các công cụ trực tiếp như Process Explorer có thể bị đánh lừa thành báo cáo rằng một tiến trình có ít đặc quyền hơn thực tế. Bạn có thể sử dụng phân tích nhớ trí để xác định chính xác hơn sự thật.
+
+**Cấu trúc dữ liệu**
+
+
+Cấu trúc _TOKEN có kích thước lớn, vì vậy chúng ta sẽ không hiển thị tất cả các thành viên. Hơn nữa, cấu trúc này đã thay đổi đáng kể về cách lưu trữ thông tin đặc quyền giữa Windows 2003 và Vista. Dưới đây là ví dụ về các phiên bản cấu trúc trước đây, từ hệ thống 64-bit Windows 2003:
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-30%20165652.png)
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-30%20165735.png)
+
+
+Dưới đây là các cấu trúc tương đương cho hệ thống 64-bit Windows 7:
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-30%20165834.png)
+
+**Các điểm chính**
+
+- UserAndGroupCount: Đây là một số nguyên lưu trữ kích thước của mảng UserAndGroups.
+- UserAndGroups: Một mảng các cấu trúc _SID_AND_ATTRIBUTES liên quan đến thông tin token. Mỗi phần tử trong mảng mô tả một người dùng hoặc nhóm khác nhau mà tiến trình là thành viên. Thành viên Sid của _SID_AND_ATTRIBUTES trỏ tới cấu trúc _SID, có các thành viên IdentifierAuthority và SubAuthority mà bạn có thể kết hợp để tạo thành chuỗi SID S-1-5-[snip].
+- PrivilegeCount (Chỉ có trên Windows XP và 2003): Đây là một số nguyên lưu trữ kích thước của mảng Privileges.
+- Privileges (Chỉ có trên Windows XP và 2003): Một mảng các cấu trúc _LUID_AND_ATTRIBUTES mô tả mỗi đặc quyền và thuộc tính của nó (tức là có mặt, được bật, bật theo mặc định).
+- Privileges (Trên Windows Vista và các phiên bản sau): Đây là một phiên bản của cấu trúc _SEP_TOKEN_PRIVILEGES, có ba giá trị song song 64-bit (Present, Enabled, EnabledByDefault). Các vị trí bit tương ứng với các đặc quyền cụ thể, và các giá trị của bit (bật hoặc tắt) mô tả trạng thái của đặc quyền đó.
+
+### Live Response: Accessing Tokens
+
+Trên một máy tính hoạt động, một tiến trình có thể truy cập vào token của chính nó thông qua API OpenProcessToken. Sau đó, để liệt kê các SID hoặc đặc quyền, nó có thể sử dụng GetTokenInformation với các tham số mong muốn. Với quyền quản trị, nó cũng có thể truy vấn (hoặc đặt) token của các tiến trình của người dùng khác, bao gồm cả các tiến trình quan trọng của hệ thống. Tất nhiên, các công cụ hiện có đã cung cấp loại chức năng này cho bạn, chẳng hạn như Sysinternals Process Explorer. Hình 6-8 cho thấy thông tin token cho explorer.exe. Dữ liệu SID xuất hiện ở phía trên, và dữ liệu đặc quyền xuất hiện ở mức dưới.
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-30%20170227.png)
+
+Thông qua thông tin token của tiến trình explorer.exe này, chúng ta có thể nhận ra rằng nó thuộc về người dùng có tên là Jimmy, và SID tương ứng của Jimmy là S-1-5-21-[snip]-1000. Bằng cách phân tích các SID khác trong token của tiến trình này, chúng ta cũng nhận thấy nó thuộc vào các nhóm Everyone, LOCAL và NT AUTHORITY\Authenticated Users. Token của tiến trình này cũng chứa năm đặc quyền, nhưng chỉ có một trong số chúng được kích hoạt. Các trang tiếp theo sẽ đi sâu vào các khái niệm này để cung cấp thông tin chi tiết hơn.
+
+### Extracting and Translating SIDs in Memory
+
+Các API trực tiếp trên hệ thống Windows mà chúng ta đã đề cập trước đó là cách tiện lợi để liệt kê các SID trên các hệ thống đang chạy. Windows cũng cung cấp API ConvertSidToStringSid để chuyển đổi dữ liệu số trong cấu trúc _SID thành định dạng chuỗi S-1-5-[snip] có thể đọc được. Ngoài ra, Windows cũng cung cấp API LookupAccountSid để trả về tên tài khoản cho một SID cụ thể. Tuy nhiên, vì chúng ta đang làm việc với các bản ghi bộ nhớ, Volatility (đặc biệt là plugin getsids) sẽ làm nhiệm vụ tìm token của từng tiến trình, trích xuất các thành phần số trong cấu trúc _SID và chuyển đổi chúng thành chuỗi. Sau khi hoàn thành, plugin sẽ ánh xạ các chuỗi này thành tên người dùng và nhóm trên máy tính cục bộ hoặc miền.
+
+Có một số cách khác nhau để thực hiện việc ánh xạ này. Đầu tiên, các SIDs đã biết (xem http://support.microsoft.com/kb/243330) được cài đặt sẵn trong Windows và do đó có thể cài đặt sẵn trong plugin của Volatility. Chúng bao gồm các SID như S-1-5 (NT Authority) và S-1-5-32-544 (Administrators). Cũng có các SID dành cho Dịch vụ được tiền tố bằng S-1-5-80. Phần còn lại của SID trong trường hợp này bao gồm băm SHA1 của tên dịch vụ tương ứng (trong Unicode, chữ hoa) - một thuật toán được mô tả chi tiết hơn tại đây: http://volatility-labs.blogspot.com/2012/09/movp-23-event-logs-and-service-sids.html.
+
+Cuối cùng, có các SID của Người dùng như S-1-5-21-4010035002-774237572-2085959976-1000. Các SID này bao gồm các thành phần sau:
+- S: Tiền tố chỉ ra rằng chuỗi là một SID.
+- 1: Cấp độ sửa đổi (phiên bản của quy định SID) từ _SID.Revision.
+- 5: Giá trị thông tin nhận diện từ _SID.IdentifierAuthority.Value.
+- 21-4010035002-774237572-2085959976: Nhận diện máy tính cục bộ hoặc miền từ các giá trị _SID.SubAuthority.
+- 1000: Một nhận diện tương đối đại diện cho bất kỳ người dùng hoặc nhóm nào không tồn tại theo mặc định.
+
+Bạn có thể ánh xạ chuỗi SID thành tên người dùng bằng cách truy vấn registry. Dưới đây là một ví dụ về cách thực hiện điều này:
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-30%20170747.png)
+
+Bằng cách nối chuỗi SID vào khóa registry ProfileList, bạn có thể xem giá trị có tên ProfileImagePath. Tên người dùng sau đó được xác định trong đường dẫn hồ sơ. Trong trường hợp này, tên người dùng là "nkESis3ns88S" - đó là một tài khoản sau cửa sau được tạo ra ngẫu nhiên bởi kẻ tấn công để giữ quyền truy cập vào hệ thống. Ánh xạ các SID sang tên người dùng có thể giúp xác định người dùng hoặc nhóm liên quan đến các tiến trình cụ thể và hiểu về ngữ cảnh bảo mật của một tiến trình.
+
+>GHI CHÚ<br>
+Để biết thêm thông tin về việc dịch các giá trị SID, hãy tham khảo các liên kết sau đây:
+>-	Kết nối tiến trình với người dùng: http://moyix.blogspot.com/2008/08/linking-processes-to-users.html.
+> -	Cách liên kết tên người dùng với Security Identifier (SID): http://support.microsoft.com/kb/154599/en-us
+> -	Cấu trúc Security Identifier: http://technet.microsoft.com/en-us/library/cc962011.aspx.
+
+### Detecting Lateral Movement
+
+Nếu bạn cần liên kết một tiến trình với một tài khoản người dùng hoặc điều tra các nỗ lực chuyển động bên, hãy sử dụng tiện ích getsids. Đây là đầu ra từ thử thách pháp lý GrrCON của Jack Crook (xem http://michsec.org/2012/09/misec-meetup-october-2012/).
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-30%20171514.png)
+
+Lệnh này hiển thị các SID liên kết với tiến trình explorer.exe cho người dùng đã đăng nhập hiện tại. Bạn sẽ ngay lập tức nhận thấy rằng một SID (S-1-5-21-[snip]-1115) không hiển thị tên tài khoản. Trên các hệ thống không xác thực đến một miền, bạn sẽ thấy tên người dùng cục bộ bên cạnh SID. Tuy nhiên, trong trường hợp này, do Volatility không có quyền truy cập vào registry máy từ xa (tức là máy điều khiển miền hoặc máy chủ Active Directory), nó không thể thực hiện quá trình giải quyết.
+
+Câu hỏi mà bạn có thể trả lời với getsids là: Kẻ tấn công đã đạt được mức truy cập nào? Đừng dừng lại sau khi thấy rằng explorer.exe là thành viên của nhóm Quản trị viên. Trên máy này, kẻ tấn công thực tế đã tham gia vào các nhóm Quản trị viên miền và Doanh nghiệp, cho phép anh ta di chuyển dọc theo toàn bộ mạng doanh nghiệp. Trong kịch bản cụ thể này, kẻ tấn công kết hợp Remote Access Trojan (RAT) Poison Ivy (PI) với việc sử dụng tấn công Pass the Hash (PtH). Bạn có thể đọc một phân tích đầy đủ về cuộc tấn công này tại đây: http://volatility-labs.blogspot.com/2012/10/solving-grrcon-networkforensics.html.
+
+## Privileges
+
+Quyền đặc biệt là một thành phần quan trọng khác liên quan đến bảo mật và kiểm soát truy cập. Một quyền đặc biệt là sự cho phép thực hiện một nhiệm vụ cụ thể, chẳng hạn như gỡ lỗi một tiến trình, tắt máy tính, thay đổi múi giờ hoặc tải một trình điều khiển kernel. Trước khi một tiến trình có thể bật một quyền, quyền phải có trong token của tiến trình đó. Người quản trị quyết định quyền nào có mặt bằng cách cấu hình chúng trong Chính sách Bảo mật Cục bộ (LSP), như được hiển thị trong Hình 6-9, hoặc theo cách lập trình bằng cách gọi LsaAddAccountRights. Bạn có thể truy cập LSP bằng cách vào Start ➪ Run và gõ SecPol.msc.
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-30%20171901.png)
+
+### Commonly Exploited Privileges
+
+Sau khi một quyền xuất hiện trong token của một tiến trình, nó phải được bật (enabled). Dưới đây là một số cách để kích hoạt các quyền:
+
+- Kích hoạt theo mặc định: LSP có thể chỉ định rằng các quyền được kích hoạt theo mặc định khi một tiến trình bắt đầu.
+- Kế thừa: Trừ khi được chỉ định khác, các tiến trình con sẽ kế thừa ngữ cảnh bảo mật từ người tạo ra chúng (tiến trình cha).
+- Kích hoạt rõ ràng: Một tiến trình có thể kích hoạt một quyền rõ ràng bằng cách sử dụng API AdjustTokenPrivileges.
+
+Từ góc nhìn pháp y, bạn nên quan tâm nhất đến các quyền sau khi chúng được kích hoạt rõ ràng. Để có danh sách đầy đủ các quyền có thể có và mô tả của chúng, hãy xem tại http://msdn.microsoft.com/en-us/library/windows/desktop/bb530716(v=vs.85).aspx.
+
+- SeBackupPrivilege: Quyền này cấp quyền truy cập đọc vào bất kỳ tệp nào trên hệ thống tệp, bất kể ACL (Access Control List) được chỉ định của nó. Kẻ tấn công có thể tận dụng quyền này để sao chép các tệp bị khóa.
+
+- SeDebugPrivilege: Quyền này cấp quyền cho việc đọc từ hoặc ghi vào không gian bộ nhớ riêng của tiến trình khác. Nó cho phép phần mềm độc hại bypass các ranh giới bảo mật thường tách biệt các tiến trình. Thực tế, hầu hết các phần mềm độc hại thực hiện việc tiêm mã từ chế độ người dùng đều dựa vào việc kích hoạt quyền này.
+
+- SeLoadDriverPrivilege: Quyền này cấp quyền cho việc tải hoặc hủy tải các trình điều khiển hạt nhân.
+
+- SeChangeNotifyPrivilege: Quyền này cho phép người gọi đăng ký một hàm gọi lại được thực thi khi các tệp và thư mục cụ thể thay đổi. Kẻ tấn công có thể sử dụng nó để xác định ngay lập tức khi một trong các tệp cấu hình hoặc tệp thực thi của họ bị loại bỏ bởi phần mềm diệt virus hoặc quản trị viên.
+
+- SeShutdownPrivilege: Quyền này cho phép người gọi khởi động lại hoặc tắt hệ thống. Một số nhiễm trùng, chẳng hạn như những thay đổi Master Boot Record (MBR), sẽ không được kích hoạt cho đến lần khởi động hệ thống kế tiếp. Do đó, bạn thường thấy phần mềm độc hại cố gắng tăng tốc thủ tục bằng cách khởi động lại máy tính.
+
+>**Lưu ý:**<br> Cem Gurkok đã hỗ trợ thiết kế tính năng của Volatility để phân tích đặc quyền trong bộ nhớ. Bạn có thể đọc bài thuyết trình của anh ấy, Reverse Engineering with Volatility on a Live System: The Analysis of Process Token Privileges, tại đây: http://volatility-labs.blogspot.com/2012/10/omfw-2012-analysis-of-process-token.html.
+
+### Analyzing Explicit Privileges
+
+Lý do tại sao chúng ta thường quan tâm đến đặc quyền được bật một cách rõ ràng là bởi vì nó thể hiện ý thức hoặc ý định. Nếu một tiến trình có thể thay đổi múi giờ vì LSP (Chính sách Bảo mật Cục bộ) cấp cho tất cả tiến trình khả năng đó hoặc vì tiến trình cha của nó có khả năng đó, điều đó không cho bạn biết gì về chức năng dự định của tiến trình đó. Tuy nhiên, nếu một tiến trình cụ thể đã bật đặc quyền để thay đổi múi giờ, bạn có thể chắc chắn rằng nó sẽ cố gắng thay đổi múi giờ.
+
+Dưới đây là đầu ra của tiện ích Volatility privs. Bạn sẽ thấy tên đặc quyền cùng với các thuộc tính của nó (hiện có, đã bật, và/hoặc được bật mặc định).
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-30%20172751.png)
+
+Bạn có thể thấy một số đặc quyền xuất hiện trong đầu ra. Chỉ có sáu đặc quyền đã được bật, nhưng ba trong số đó được bật mặc định. Do đó, bạn có thể kết luận rằng explorer.exe đã bật đặc quyền undock, debug và load driver một cách rõ ràng. Theo thời gian, bạn sẽ nhận ra rằng explorer.exe luôn bật đặc quyền undock, vì vậy đặc quyền này không đáng lo ngại. Nhưng tại sao Windows Explorer cần phải gỡ lỗi các tiến trình khác và tải các trình điều khiển kernel? Câu trả lời đơn giản là: Nó không cần! Tiến trình này đang chứa một mẫu injected Poison Ivy (PI)  và PI đã bật các đặc quyền này một cách rõ ràng.
+
+### Detecting Token Manipulation
+
+Như đã đề cập trước đó, API của Windows (AdjustTokenPrivileges) không cho phép và không nên cho phép bật một đặc quyền mà không có trong mã thông báo. Do đó, việc các API như GetTokenInformation (và các công cụ dựa trên API này) sẽ trước tiên kiểm tra xem cái gì đã có trong mã thông báo và sau đó trả về tập con đã được bật là hoàn toàn hợp lý. Tuy nhiên, có một điểm cần lưu ý: Một nhà nghiên cứu tài năng tên là Cesar Cerrudo đã phát hiện rằng khi kiểm tra xem một quy trình có thể thực hiện một tác vụ hay không, kernel chỉ quan tâm đến những đặc quyền đã được bật. Kết quả là, Cesar đã đề xuất trong bài báo của mình có tiêu đề "Easy Local Windows Kernel Exploitation" (https://www.blackhat.com/html/bh-us-12/bh-us-12-archives.html#Cerrudo) một phương pháp để bypass các API của Windows và bật tất cả các đặc quyền cho một quy trình, ngay cả khi chúng không có sẵn trong mã thông báo.
+
+#### Attack Simulation with Volshell
+
+
 
 

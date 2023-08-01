@@ -268,3 +268,143 @@ Tên người dùng và mật khẩu của tài khoản đều hiển thị rõ 
 
 Yara là một công cụ do Victor M. Alvarez phát triển (http://plusvic.github.io/yara) cho việc tìm kiếm mẫu nhanh chóng và linh hoạt trong các tập dữ liệu tùy ý. Nó hoạt động trên các tập tin, bản sao bộ nhớ, bản ghi gói tin và những tập dữ liệu khác. Một điều cần nhớ là bạn có thể dễ dàng quét qua một tập tin bản sao bộ nhớ vật lý, nhưng hãy nhớ rằng các địa chỉ ảo liền mạch có thể bị phân mảnh trong bộ nhớ vật lý. Do đó, các ký tự chữ ký của bạn có thể không khớp với các mẫu thực sự tồn tại trong bộ nhớ nếu chúng xảy ra chạm qua ranh giới trang. Plugin yarascan của Volatility cho phép bạn quét qua bộ nhớ ảo, vì vậy vấn đề phân mảnh ở tầng vật lý không còn là một vấn đề. Hơn nữa, khi bạn tìm thấy kết quả khớp, bạn có thể liên kết chúng lại với quá trình hoặc mô-đun nhân hạt nhân sở hữu bộ nhớ - mang lại ngữ cảnh và một khung tham chiếu mạnh mẽ.
 
+>**GHI CHÚ:**<br> Volatility cũng cung cấp các plugin linux_yarascan và mac_yarascan, chúng hoạt động tương tự trên các tập tin bản sao bộ nhớ Linux và Mac.
+
+Các khả năng chính của plugin yarascan bao gồm:
+- Quét một, nhiều hoặc tất cả các tiến trình cho một chữ ký cụ thể được cung cấp trên dòng lệnh (--pid và --yara-rules).
+- Quét một tiến trình ẩn mà bạn xác định qua vị trí vật lý của _EPROCESS của nó (--offset).
+- Quét toàn bộ khoảng nhớ kernel (--kernel) và hiển thị tên của module kernel, nếu có.
+- Bất kỳ tùy chọn nào trong số các tùy chọn trước đó, nhưng tìm các chữ ký trong tệp luật Yara được cung cấp (--yara-file). Đối số cho tùy chọn này cũng có thể là một tệp chỉ mục bao gồm nhiều tệp khác.
+- Tùy chọn, sao lưu các khoảng nhớ chứa kết quả tích cực vào đĩa (--dump-dir). Quy trình này tiết kiệm một vài bước - thay vì phân tích kết quả và sau đó trích xuất dữ liệu để phân tích tiếp theo, nó có thể tự động hoá tất cả.
+
+Dưới đây là hiển thị đầy đủ các tùy chọn dòng lệnh cho plugin này:
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-31%20231057.png)
+
+Đối với việc tìm kiếm những thông tin cụ thể, có nhiều khả năng tồn tại. Bạn có thể bắt đầu bằng cách đọc hướng dẫn người dùng Yara (được liên kết từ trang chính) để biết cú pháp và quy tắc viết chữ ký. Dưới đây là một số ý tưởng và nguồn của những chữ ký đã tồn tại mà bạn có thể sử dụng:
+
+- Địa chỉ IP (dưới dạng chuỗi hoặc hệ thập phân), tên miền hoặc URL.
+- Biểu thức chính quy cho số An ninh Xã hội, số thẻ tín dụng, số điện thoại, sinh nhật, băm mật khẩu và những thông tin khác.
+- Chữ ký của Packer. Công thức 3-4 trong Malware Analyst’s Cookbook cung cấp một tập lệnh Python (peid_to_yara.py) chuyển đổi chữ ký PEiD thành các quy tắc Yara.
+- Chữ ký của phần mềm diệt virus. Công thức 3-3 trong Malware Analyst’s Cookbook cung cấp một tập lệnh Python (clamav_to_yara.py) chuyển đổi chữ ký ClamAV thành các quy tắc Yara.
+- Tham gia nhóm Google Exchange Yara Signature: http://www.deependresearch.org/2012/08/yara-signature-exchange-google-group.html
+- Chữ ký từ AlienVault Labs: https://github.com/AlienVault-Labs/AlienVaultLabs
+
+Để quét tất cả các tiến trình để tìm một tên miền cụ thể, bạn có thể thực hiện như sau:
+
+```
+$ python vol.py –f mem.dmp yarascan --profile=Win7SP1x64
+ --yara-rules="windows-update-http.com"
+```
+
+Để quét hai tiến trình cụ thể để tìm một phiên bản Unicode của cùng một tên miền, bạn có thể sử dụng lệnh sau (tham số --wide chỉ định rằng chuỗi tìm kiếm là Unicode):
+
+```
+$ python vol.py –f mem.dmp yarascan --profile=Win7SP1x64
+ --pid=1080,1140 --wide
+ --yara-rules="windows-update-http.com"
+```
+
+Để quét một quy trình không liên kết hoặc bị ẩn bằng cách sử dụng tất cả các chữ ký trong tệp quy tắc được chỉ định (kèm theo bất kỳ tệp nào được bao gồm với chỉ thị include trong Yara), bạn có thể làm như sau. Đảm bảo thay thế "OFFSET" bằng vị trí vật lý của đối tượng _EPROCESS mục tiêu:
+
+```
+$ python vol.py –f mem.dmp yarascan --profile=Win7SP1x64
+ --offset=OFFSET
+ --yara-file=/path/to/your/yara.rules
+```
+
+Để tìm kiếm CPU opcodes hoặc các loại chuỗi byte khác trong tất cả các quy trình và tự động lưu các đoạn bộ nhớ chứa vào thư mục đầu ra chỉ định, bạn có thể sử dụng lệnh sau (lưu ý rằng các byte hex được bao quanh bởi dấu ngoặc nhọn):
+
+```
+$ python vol.py –f mem.dmp yarascan --profile=Win7SP1x64
+ --yara-rules="{eb 90 ff e4 88 32 0d}"
+ --dump-dir=OUTDIR
+```
+
+Cuối cùng, mặc dù chúng ta đang ở trong chương về bộ nhớ quá trình, đây là một bản xem trước về cách quét bộ nhớ kernel để tìm kiếm biểu thức chính quy (regular expressions). Cú pháp là đặt biểu thức chính quy trong dấu gạch chéo chéo (/):
+
+```
+$ python vol.py –f mem.dmp yarascan --profile=Win7SP1x64
+ --yara-rules="/(www|net|com|org)/"
+ --kernel
+```
+
+Bây giờ khi bạn đã xem qua một số ví dụ về cách sử dụng, dưới đây là cách xuất hiện của kết quả. Vài trang trước đó, bạn đã sử dụng search_process_memory() để tìm mật khẩu Gmail trong bộ nhớ trình duyệt. Cùng một bản ghi nhớ bộ nhớ được sử dụng cho ví dụ này, nhưng được hiển thị từ quan điểm của Yara.
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-31%20231121.png)
+
+Chúng ta đã tìm thấy kết quả dự kiến trong bộ nhớ của PID 3660. Mặc định, yarascan chỉ hiển thị một số dữ liệu xung quanh nội dung kích hoạt luật của bạn, nhưng bạn có thể kiểm soát số lượng dữ liệu được hiển thị hoặc trích xuất bằng tùy chọn --size. Vì tiêu chí tìm kiếm được chỉ định trên dòng lệnh, tất cả các kết quả đều hiển thị là kích hoạt luật chung r1. Tuy nhiên, khi bạn có hàng ngàn luật trong tệp luật, nó sẽ hiển thị tên của luật thực sự khớp với dữ liệu.
+
+#### Zeus Encryption Keys in Memory
+
+Cho đến nay, bạn đã thấy ba khía cạnh rất mạnh mẽ của phân tích bộ nhớ: khả năng phân loại các khu vực bộ nhớ dựa trên siêu dữ liệu của chúng, phát triển và quét các mẫu phức tạp và xử lý kết quả với mã Python tùy chỉnh. Ví dụ sau đây cho thấy những gì có thể khi bạn kết hợp những khả năng này. Cụ thể, bạn sẽ tìm hiểu cách xác định khóa mã hóa RC4 256 byte của Zeus trong bộ nhớ tiến trình, tìm các khối cấu hình đã được mã hóa tương ứng và sau đó sử dụng khóa để giải mã cấu hình. Phiên bản ban đầu của phân tích này (Abstract Memory Analysis: Zeus Encryption Keys) có sẵn tại đây: http:// mnin.blogspot.com/2011/09/abstract-memory-analysis-zeus.html.
+Trước khi bắt đầu, bạn nên biết một chút về lịch sử của Zeus. Gần cuối năm 2008 (khoảng phiên bản 1.2.0), Zeus bắt đầu sử dụng các khóa RC4 256 byte duy nhất nhúng trong mỗi tệp nhị phân để giải mã các cấu hình, điều này ngăn các nhà phân tích sử dụng khóa từ một mẫu để giải mã cấu hình được sử dụng bởi mẫu khác. Hơn nữa, nếu nhà điều tra tìm thấy một cấu hình, họ không thể giải mã nó mà không có tệp nhị phân tương ứng - ngay cả khi họ biết thuật toán là RC4. Cùng một khái niệm áp dụng cho các tệp dữ liệu bị đánh cắp của Zeus, được bảo vệ bằng một khóa RC4 riêng biệt (vì vậy bạn cần hai khóa cho mỗi tệp nhị phân để khôi phục lại toàn bộ dữ liệu).
+
+>**GHI CHÚ**<br>
+Để có mô tả chi tiết hơn về thuật toán mã hóa của Zeus, hãy xem Config Decryptor for Zeus 2.0 của Sergei Shevchenko: http://blog.threatexpert.com/2010/05/config-decryptor-for-zeus-20.html.
+
+Bước đầu tiên để tự động hóa các hành động cần thiết trong một plugin Volatility là phân tích ngược mã nhị phân của Zeus. Mất một chút thời gian để xác định vị trí lưu trữ các khóa và dữ liệu cấu hình trong mã nhị phân, nhưng sau đó chúng tôi có thể tập trung nỗ lực vào việc tìm chúng trong bộ nhớ bị tràn. Hình 7-6 cho thấy một bản dịch của các chức năng quan trọng. Chúng tôi tìm kiếm các chuỗi lệnh liên quan đến biến toàn cục trong mã nhị phân, từ đó có thể dẫn đến khóa RC4, dữ liệu cấu hình đã được mã hóa và thông tin khác. Nhiều trong số các hàm và biến mà chúng tôi cần đã được đánh dấu.
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-31%20231139.png)
+
+Hình vẽ cho thấy một hàm có tên là decode_config_data gọi hàm custom_memcpy, đây chỉ là một phiên bản trực tiếp của API memcpy tiêu chuẩn. Tham số thứ hai (nguồn dữ liệu đang được sao chép) trong trường hợp này được cung cấp bởi lệnh push offset config_data. Do đó, biến config_data chứa một offset tương đối đến cơ sở của mã thực thi đang được phân tích, nơi chúng ta có thể tìm thấy dữ liệu cấu hình đã được mã hóa. Tương tự, bạn cũng có thể thấy hàm được đánh dấu là rc4_decrypt. Dự kiến, một trong những tham số của hàm này là vị trí của khóa. Lệnh push offset real_rc4_key cung cấp offset này.
+
+Để tìm các biến chứa các offset cần thiết, chúng tôi đã xây dựng các chữ ký cho các hàm mà bạn thấy trong hình vẽ. Ví dụ, bạn có thể biểu diễn chữ ký hàm có tên là signature_function bằng các ký tự đại diện cho dấu hỏi chấm (wildcards) như sau:
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-31%20231156.png)
+
+Các byte lưu trữ offset đến khóa RC4 được in đậm. Nếu bạn có thể tìm thấy chữ ký, bạn có thể dễ dàng trích xuất khóa. Hãy nhớ rằng các ký tự đại diện (wildcards) là quan trọng vì có thể có sự khác biệt trong các biên dịch viên (compiler) của các phiên bản Zeus khác nhau. Vì vậy, bạn cũng nên tìm kiếm các frame dựa trên EBP, như sau:
+
+```
+LEA EAX, [EBP-????????]
+PUSH EAX
+LEA EAX, [EBP-????????]
+PUSH EAX
+CALL ????????        ; custom_memcpy
+MOV EAX, 1E6h
+PUSH EAX
+PUSH OFFSET ???????? ; real_rc4_key
+```
+
+Để diễn tả hàm có tên decode_config_data, bạn có thể làm như sau:
+
+```
+PUSH ESI
+MOV EDX, ????0000    ; config size (immediate)
+PUSH EDX
+PUSH OFFSET ???????? ; config_data
+PUSH EAX
+CALL ????????        ; custom_memcpy
+MOV ESI, ????????    ; last_section_rva
+MOV ECX, ????????    ; imagebase
+```
+
+Có một số biến thể của các mẫu này, một lần nữa là do sự khác biệt trong trình biên dịch và việc sử dụng các thanh ghi tổng quát, nhưng điều đó không gì mà các quy tắc Yara không thể xử lý. Bằng cách chuyển đổi các lệnh trước thành các opcode (tức là các byte hex tương ứng với các thao tác CPU), chúng ta có các chữ ký sau đây:
+
+>**LƯU Ý:**<br> Để chuyển đổi các lệnh thành opcode, bạn có thể sử dụng ndisasm trên Linux. Nếu bạn đã xem mã trong IDA Pro, bạn cũng có thể vào View ➪ Options ➪ Disassembly và tăng số byte opcode. Sau đó, nó sẽ hiển thị các giá trị hex tương ứng bên cạnh các lệnh.
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-31%20231221.png)
+
+Mặc dù chúng ta có thể quét qua mọi phạm vi bộ nhớ trong mọi tiến trình để tìm các chữ ký này, điều đó sẽ là quá đáng. Chúng ta đã biết từ công việc trước đó rằng Zeus tiêm mã nhị phân của mình vào các tiến trình. Do đó, bạn có thể tận dụng một số kiến thức đã được thảo luận trước đó trong chương. Thay vì quét qua tất cả các phạm vi bộ nhớ, bạn có thể lọc các nút VAD là thực thi, không được sao lưu bởi một tập tin và đã cam kết. Điều này thu hẹp không gian tìm kiếm và tăng hiệu suất tổng thể của plugin.
+
+Đầu ra sau đây cho thấy kết quả của plugin zeusscan2 được xây dựng dựa trên nghiên cứu này. Vì lý do ngắn gọn, các khóa RC4 256 byte đã bị cắt giảm chỉ còn vài byte. Bạn có thể thấy URL tới cấu hình Zeus, định danh duy nhất được gán cho máy bị nhiễm, và các khóa đăng ký và tên tệp được tạo ngẫu nhiên mà nó sử dụng cho sự kiên nhẫn, cùng với các dữ liệu khác.
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-31%20231240.png)
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-31%20231259.png)
+
+Các plugin Zeus mô tả trong phần này đã dẫn đến nhiều khả năng liên quan khác trong phân tích bộ nhớ. Dưới đây là danh sách các plugin liên quan mà chúng ta hiện đã biết:
+
+- Andreas Schuster (http://computer.forensikblog.de/) đã dựa trên plugin zeusscan2 gốc của mình để tạo các công cụ quét cấu hình Poison Ivy.
+
+- Sau đó, Santiago Vicente đã bổ sung hỗ trợ tìm kiếm và giải mã cấu hình Citadel (http://blog.buguroo.com/?p=10291&lang=en) từ bộ nhớ tiến trình.
+
+- Brian Baskin đã viết về việc trích xuất cấu hình JavaRAT bằng Volatility (http://www.ghettoforensics.com/2013/10/dumping-malware-configuration-data-from.html).
+
+- Nhóm Cassidian CyberSecurity đã phát hành một plugin để phát hiện và phân tích các mẫu PlugX (http://bitbucket.cassidiancybersecurity.com/volatility_plugins/wiki/Home).
+
+- Chúng tôi cũng đã thấy các học viên của các khóa đào tạo của chúng tôi, như Ian Ahl, tạo ra các plugin tương tự để phát triển chữ ký Yara để tìm DarkComet trong bộ nhớ (http://www.tekdefense.com/news/2013/12/23/analyzing-darkcomet-in-memory.html).
+
+## Tổng quan
+
+Dữ liệu trong bộ nhớ tiến trình thường là một nguồn thông tin quý giá, nhưng có thể khó tìm thấy khi nó được xen kẽ với dữ liệu không liên quan. Hiểu các cờ và thuộc tính của các bản mô tả địa chỉ ảo giúp bạn giới hạn không gian tìm kiếm vào các khu vực cụ thể của bộ nhớ, chẳng hạn như ngăn xếp, bộ nhớ heap hoặc một DLL cụ thể. Hơn nữa, việc hiểu cấu trúc của bộ nhớ tiến trình giúp bạn trang bị tốt hơn để thực hiện các cuộc điều tra yêu cầu phân tích các tài nguyên tiến trình. Sử dụng một công cụ quét dựa trên mẫu hoặc chữ ký có khả năng cấu hình cao (Yara) là một cách tuyệt vời để nhanh chóng tìm kiếm chứng cứ. Các chữ ký Yara cũng cho phép các khả năng trừu tượng như tìm kiếm các khóa mã hóa, chuỗi lệnh CPU, và nhiều hơn thế nữa. Trong các chương tiếp theo, bạn sẽ thấy cách kiến thức cơ bản này có thể được mở rộng.

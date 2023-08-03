@@ -265,3 +265,106 @@ Một _PARTITION chứa ba cấu trúc _RTL_DYNAMIC_HASH_TABLE – một cho cá
 >**GHI CHÚ**<br>
 Có thể khiến bạn ngạc nhiên, nhưng số lượng phân vùng phụ thuộc vào số lượng bộ xử lý tối đa, chứ không phải số lượng bộ xử lý hoạt động (ví dụ, một hệ thống có thể hỗ trợ lên đến 16 CPU, nhưng chỉ có một CPU được cài đặt). Chúng ta biết điều này vì hàm tcpip!TcpStartPartitionModule hoạt động theo cách sau đây:
 >![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-02%20223827.png)
+>Số lượng cấu trúc _PARTITION được cấp phát thông qua lời gọi ExAllocatePoolWithTag dựa trên MaxPartitionShift, là một giá trị được trả về bởi hàm TcpMaxPartitionShift. Để tính toán giá trị này, mã nguồn sau được sử dụng:
+```
+UCHAR TcpMaxPartitionShift(void)
+{
+     return TcpPartitionShiftForProcessorCount(
+             KeQueryMaximumProcessorCountEx(ALL_PROCESSOR_GROUPS));
+}
+```
+>Khi KeQueryMaximumProcessCountEx được truyền đối số ALL_PROCESSOR_GROUPS, nó chỉ trả về biến toàn cục nt!KeMaximumProcessors, lưu trữ số lượng bộ xử lý tối đa được hỗ trợ bởi hệ thống. Điều này rõ ràng khác với việc gọi KeQueryActiveProcessorCountEx, trả về nt!KeNumberProcessors - số lượng bộ xử lý đang hoạt động.
+
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-02%20223845.png)
+
+### Port Pools and Bitmaps
+
+Một cách khác không được ghi chép để liệt kê hoạt động mạng trong bản sao bộ nhớ là sử dụng các nhóm cổng và bản đồ bit. Trong phần "Big Page Pool" của Chương 5, bạn đã tìm hiểu cách tận dụng dữ liệu mô tả mà Windows lưu trữ về vị trí của các phân bổ lớn trong kernel pool. Điều này là một ví dụ về cách sử dụng kiến thức đó. Cụ thể, các bảng theo dõi trang lớn sẽ cho bạn biết địa chỉ chính xác của các phân bổ có thẻ InPP - và những phân bổ này lưu trữ cấu trúc _INET_PORT_POOL.
+
+Các nhóm cổng này chứa một bản đồ bit 65535 bit (mỗi bit đại diện cho một cổng trên hệ thống) và cùng một số lượng con trỏ đến các cấu trúc _PORT_ASSIGNMENT. Một cách cực kỳ nhanh chóng để xác định các cổng đang sử dụng trên hệ thống là quét bản đồ bit (0 = chưa sử dụng, 1 = đã sử dụng). Nếu một bit được đặt, Windows sử dụng chỉ số của bit để tính toán địa chỉ của cấu trúc _TCP_LISTENER, _TCP_ENDPOINT hoặc _UDP_ENDPOINT tương ứng.
+
+>**GHI CHÚ**<br>
+Cài đặt của Microsoft về bản đồ bit (_RTL_BITMAP) được tài liệu tốt bởi OSR tại đây: https://www.osronline.com/article.cfm?article=523. Ngoài ra, để xem mã chính xác được liên quan đến tính toán địa chỉ các cấu trúc kết nối, xem hàm tcpip!InetBeginEnumeratePort.
+
+Hình 11-5 thể hiện một biểu đồ về cách các cấu trúc khác nhau có mối quan hệ với nhau. Biểu tượng sét đánh dấu cho thấy cấu trúc _PORT_ASSIGNMENT không trực tiếp trỏ đến các cấu trúc kết nối - giá trị này được tính toán từ địa chỉ cơ sở, cộng với chỉ mục của bit trong bản đồ bit.
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-02%20223857.png)
+
+## Internet History
+
+Tất cả các trình duyệt web đều có thể lưu trữ lịch sử duyệt web của người dùng trong một tệp trên đĩa cứng. Trước khi quy trình trình duyệt có thể truy cập thông tin đó, nó sẽ đọc nội dung của tệp vào bộ nhớ RAM. Do đó, nếu người dùng truy cập một trang web bằng cách gõ URL một cách rõ ràng hoặc nhấp vào liên kết từ công cụ tìm kiếm, hoặc ngay cả khi mã độc sử dụng các API mạng giống như trình duyệt, bạn có cơ hội tốt để khôi phục thông tin đó từ bộ nhớ. Nói cách khác, tệp lịch sử của Internet Explorer (index.dat) không chỉ được tải bởi trình duyệt mà còn được tải bởi tất cả các quy trình, bao gồm cả Windows Explorer và các mẫu mã độc sử dụng API WinINet (InternetConnect, InternetReadFile, HttpSendRequest, v.v.) để truy cập các trang web HTTP, HTTPS hoặc FTP.
+
+Để bắt đầu cuộc thảo luận, bạn có thể xác định một quy trình trong bộ nhớ mà bạn nghi ngờ đang thực hiện các yêu cầu web. Trong trường hợp này, chúng tôi đã chọn hai quy trình IE:
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-02%20223913.png)
+
+Bây giờ bạn đã biết các PID (2580 và 3004), bạn có thể sử dụng plugin yarascan để có một ý tưởng ban đầu về vị trí của các ánh xạ tệp index.dat có thể tồn tại trong bộ nhớ quy trình. Vì chữ ký của tệp bao gồm "Client UrlCache", chuỗi đó sẽ là một điểm bắt đầu tốt. Lệnh sau đây hiển thị cách thực hiện:
+
+>**GHI CHÚ:**<br>
+>Cấu trúc của định dạng tệp lịch sử của Internet Explorer được tài liệu hóa ở nhiều nơi (xem http://www.forensicswiki.org/wiki/Internet_Explorer_History_File_Format). Định dạng, và do đó plugin iehistory mà chúng ta sẽ mô tả, chỉ áp dụng cho các phiên bản Internet Explorer từ 4 đến 9. Bắt đầu từ IE 10, định dạng và cơ chế lưu trữ đã thay đổi một cách đáng kể (http://hh.diva-portal.org/smash/get/diva2:635743/FULLTEXT02.pdf).
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-02%20223925.png)
+
+Chữ ký được tìm thấy ở hai vị trí khác nhau bên trong bộ nhớ của quy trình IE đầu tiên (PID 2580). Tuy nhiên, để đơn giản chỉ cần tìm các mục lịch sử, bạn không cần phân tích tiêu đề tệp index.dat hoàn toàn. Ví dụ, bạn có thể quét các bản ghi lịch sử riêng lẻ bắt đầu bằng URL, LEAK, hoặc REDR (còn có cả từ khóa HASH, nhưng không cần thiết cho mục tiêu của chúng ta). Bạn có thể kết hợp các chuỗi này thành một biểu thức chính quy để chỉ cần tìm kiếm một lần, như được hiển thị trong lệnh sau:
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-02%20223938.png)
+
+Tại vị trí offset 0x34 từ đầu của chuỗi URL hoặc LEAK, bạn có thể tìm thấy một số gồm bốn byte (68 00 00 00, như được đánh dấu đậm) chỉ định offset từ đầu của chuỗi đến vị trí đã được truy cập (tức là một URL). Đối với các URL đã được chuyển hướng, vị trí có thể được tìm thấy tại offset 0x10 của chuỗi REDR. Dựa vào thông tin này, bạn đã có thể bắt đầu tìm kiếm các URL trong bộ nhớ liên quan đến lịch sử (tức là thực sự đã được truy cập), không giống như những URL chỉ lưu lạc trong bộ nhớ.
+
+### Carving IE History Records
+
+Mặc dù bạn đã thấy một cách dễ dàng để xác định các trang web trong lịch sử IE, bạn có thể cần định dạng đầu ra khác với định dạng tốt hơn cho tự động hóa và phân tích kết quả. Ví dụ, thay vì đổ hex, bạn có thể muốn tạo một tệp giá trị được phân tách bằng dấu phẩy (CSV) của các URL đã truy cập, thời gian, dữ liệu phản hồi HTTP và nhiều trường thông tin khác. Để hỗ trợ các tính năng bổ sung này, chúng tôi đã xây dựng một plugin có tên là iehistory, định nghĩa hai tùy chọn hiển thị. Chế độ văn bản mặc định hiển thị các khối dữ liệu - một cho mỗi mục bộ nhớ cache, như được hiển thị trong đầu ra sau:
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-02%20223951.png)
+
+Dữ liệu lịch sử có thể rất thú vị. Tuy nhiên, nó cũng có thể dài dòng, vì vậy bạn có thể muốn thử tùy chọn CSV và mở nó như một bảng tính để sắp xếp và lọc. Điều này có thể được thực hiện bằng cách thêm tùy chọn --output=csv vào lệnh của bạn, như được hiển thị ở đây:
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-02%20224005.png)
+
+Để tạo một tệp mở được trong bảng tính, bạn có thể chuyển hướng đầu ra sử dụng shell (ví dụ: vol.py [tùy chọn] > output.csv) hoặc sử dụng tùy chọn tích hợp vào Volatility, như --output-file=output.csv. Sau đó, bạn có thể sắp xếp theo thời gian truy cập gần đây nhất, và cách khác.
+
+>Lưu ý rằng trong tài liệu của dự án libmsiecf (xem http://code.google.com/p/libmsiecf/), các dấu thời gian có thể là thời gian UTC hoặc thời gian cục bộ - phụ thuộc vào việc bản ghi được tìm thấy trong tệp lịch sử toàn cầu, hàng tuần hoặc hàng ngày. Một lưu ý khi quét các thẻ ghi cá nhân là không có liên kết ngược với tiêu đề lịch sử chứa nó, do đó bạn không thể dễ dàng xác định xem thời gian UTC hoặc thời gian cục bộ là chính xác.
+
+
+### IE History in Malware Investigations
+
+Dưới đây là ví dụ về cách sử dụng plugin iehistory để phân tích hệ thống đã bị nhiễm phần mềm độc hại. Bạn có thể thấy hoạt động thực tế đã được phân bố trên hai tiến trình: explorer.exe (PID 1928) và 15103.exe (PID 1192).
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-02%20224024.png)
+
+Dựa vào kết quả đầu ra, bạn có thể xác định chính xác các URL đã được truy cập. Hơn nữa, ít nhất một tập tin (promo.exe) đã được lưu trong thư mục Temporary Internet Files dưới tên promo[1].exe. Điều này cung cấp cho bạn các tư liệu mà bạn có thể sử dụng để phân loại thông qua phân tích dữ liệu trên ổ đĩa.
+
+>**CẢNH BÁO:**<br> Có khả năng malware xóa các mục trong bộ nhớ cache của IE bằng cách sử dụng API DeleteUrlCacheEntry. Tương tự, hãy nhớ rằng bạn có thể sử dụng CreateUrlCacheEntry để tạo một mục lịch sử một cách có chủ đích, ngay cả khi URL không được truy cập trên máy tính (ví dụ, để kết tội một giáo viên vô tội xem nội dung khiêu dâm trẻ em).
+
+### Brute Force URL Scans
+
+Còn một số tình huống chúng ta chưa thảo luận. Ví dụ, bạn đang tìm kiếm tất cả các URL trong bộ nhớ của quy trình (tức là nhúng trong một trang web nhưng chưa được truy cập, trong mã JavaScript hoặc trong nội dung e-mail)? Các tệp lịch sử của IE cũng được biết đến có không gian dư thừa trong đó các bản ghi mới với URL nhỏ hơn có thể ghi đè lên các bản ghi cũ với URL dài, từ đó để lại một phần của các tên miền ban đầu nguyên vẹn. Hơn nữa, với các trình duyệt lưu lịch sử ở định dạng khác nhau, chẳng hạn như Firefox và Chrome, bạn sẽ phải xử lý như thế nào?
+
+Trong những trường hợp trên, bạn luôn có thể tìm kiếm các URL một cách mạnh mẽ hơn nhưng không có cấu trúc. Nếu bạn chưa có biểu thức chính quy ưa thích để tìm kiếm các miền, địa chỉ IP và URL, hãy thử một số biểu thức trên http://regexlib.com/Search.aspx?k=URL. Dưới đây là một ví dụ về việc sử dụng một trong những biểu thức chính quy đó để tìm kiếm tất cả các tên miền trong một số tên miền cấp cao nhất nhất định (com, org, net, mil, v.v.).
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-02%20224038.png)
+
+Các tìm kiếm biểu thức chính quy thực sự rất mạnh mẽ. Thay vì sử dụng yarascan trên bộ nhớ của quá trình hoặc kernel, bạn có thể tìm kiếm qua tệp bộ nhớ thô và phát hiện bất kỳ URL hoặc tên miền nào đang tồn tại trong không gian lưu trữ đã được giải phóng hoặc hủy bỏ.
+
+## DNS Cache Recovery
+
+Bộ nhớ cache DNS của hệ thống được lưu trữ trong không gian địa chỉ của quá trình svchost.exe chạy dịch vụ giải quyết DNS. Cụ thể, bạn sẽ tìm thấy dữ liệu liên quan trên các vùng nhớ (heap) của quá trình đó. Tại thời điểm viết, chúng ta đã thấy một số plugin chứng minh khả năng (xem https://code.google.com/p/volatility/issues/detail?id=124) để khôi phục các mục cache được lưu trữ trong Windows XP 32 bit. Nếu bạn cần phân tích cache trong một cuộc điều tra, các lựa chọn của bạn bao gồm:
+- Thu thập bộ nhớ với KnTTools (xem Chương 4). Phần mềm thu thập ghi lại các mục cache DNS trong một tệp XML.
+- Tích hợp lệnh ipconfig /displaydns vào bộ công cụ phản ứng trực tiếp trên máy tính.
+- Cập nhật một trong các plugin mẫu của Volatility để hoạt động trên các hệ điều hành mới hơn.
+- Dùng kỹ thuật dò mạnh để tìm các vùng nhớ của quá trình svchost.exe và tìm kiếm các biểu thức chính quy của các tên máy chủ (xem kỹ thuật chúng ta đã sử dụng trong Chương 8 để tìm đầu vào của người dùng trong vùng nhớ của quá trình Notepad).
+
+Bên cạnh đó, bạn có thể quan tâm đến tệp hosts DNS của hệ thống mục tiêu. Khi các ứng dụng gọi DnsQuery, miễn là chúng không đặt cờ DNS_QUERY_NO_HOSTS_FILE, dịch vụ giải quyết sẽ trả về dữ liệu phù hợp từ tệp hosts (nếu có) trước khi chuyển tiếp yêu cầu đến máy chủ DNS. Mã độc thường sửa đổi tệp hosts để ngăn truy cập vào một số trang web. Do đó, kiểm tra nội dung tệp hosts cho phép bạn phát hiện các sửa đổi trái phép trên hệ thống.
+
+Để truy cập vào tệp hosts, sử dụng các plugin filescan và dumpfiles (xem Chương 16), như được thể hiện trong các lệnh sau đây. Lệnh đầu tiên tìm vị trí vật lý của cấu trúc _FILE_OBJECT của tệp hosts. Lệnh thứ hai trích xuất nội dung của tệp hosts vào đĩa.
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-02%20224101.png)
+
+Lệnh tiếp theo hiển thị các mục trong tệp hosts của hệ thống bị nhiễm. Kết quả của các mục này là các chương trình trên máy đang chạy không thể truy cập bất kỳ trang web chống virus phổ biến nào hoặc máy chủ cập nhật.
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-02%20224113.png)
+
+## Tổng quan
+
+Nhiều cuộc điều tra bắt đầu từ một cảnh báo từ hệ thống tường lửa hoặc hệ thống phát hiện xâm nhập (IDS). Mặc dù việc bắt các gói tin mạng đầy đủ rất quan trọng, nhưng chúng không luôn có sẵn. Ngay cả khi bạn được cung cấp các gói tin đã bắt, bạn vẫn cần có bộ nhớ bay để giải quyết nhiều khía cạnh của sự cố. Ví dụ, bạn phải biết cách theo dõi các kết nối trở lại các tiến trình và trình điều khiển cụ thể nếu bạn muốn phân loại hành vi là độc hại hay không. Hiểu biết về bộ nhớ tiến trình và tiêm mã có thể giúp bạn xác định chính xác mã đã khởi tạo hoặc nhận dữ liệu qua mạng. Tuy nhiên, hãy nhớ rằng một số bằng chứng về kết nối trong bộ nhớ chỉ tồn tại trong một thời gian rất ngắn. Do đó, khả năng nhanh chóng theo dõi cảnh báo và xem xét hoạt động mạng của hệ thống là rất quan trọng.

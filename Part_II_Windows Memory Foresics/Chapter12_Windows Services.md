@@ -178,5 +178,76 @@ Dưới đây là một ví dụ về cách đầu ra của Volatility trên m�
 
 ![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-02%20230952.png)
 
+Mã yêu cầu Python Extensions for Windows (pywin32) để chạy, và nó xuất dữ liệu dưới dạng định dạng INI. Tuy nhiên, bạn có thể điều chỉnh đầu ra trong một định dạng bạn muốn để hỗ trợ tự động tạo ra các cảnh báo trong kết quả plugin Volatility.
 
+#### Disk-based Hijacks
 
+Biến thể thứ hai của việc nắm đoạt dịch vụ liên quan đến thay thế tập tin của dịch vụ trên đĩa. Trong trường hợp này, ServiceDll trong registry vẫn trỏ vào cùng một đường dẫn, nhưng nội dung tập tin đã thay đổi. Quá trình này thường diễn ra qua các bước sau:
+
+1. Truy vấn registry để lấy đường dẫn đến tập tin nhị phân của dịch vụ đích.
+2. Di chuyển hoặc xóa tập tin gốc.
+3. Tạo một tập tin mới cùng đường dẫn với tập tin gốc.
+4. Khởi động lại dịch vụ (hoặc đợi cho đến khi khởi động lại hệ thống).
+
+Danh sách mã nguồn dưới đây (được đảo ngược từ một mẫu malware) mô tả cách tiếp cận cụ thể, chi tiết được thực hiện bởi một nhóm đe dọa cụ thể.
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-02%20230952.png)
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-02%20231008.png)
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-02%20231030.png)
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-02%20231052.png)
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-02%20231108.png)
+
+Dưới đây là mô tả cách hoạt động của mã nguồn:
+
+- Dòng 9: Sao chép XXXXX (đã được che giấu) vào biến szInfectSignature. Điều này sau đó được sử dụng như một đánh dấu nhiễm trùng, để malware không thay thế cùng một tệp nhiều lần.
+
+- Dòng 11-23: Mở khóa Svchost registry key và truy vấn giá trị netsvcs. Điều này trả về một giá trị REG_MULTI_SZ (danh sách chuỗi) với tên của tất cả các dịch vụ trong nhóm đòi hỏi truy cập mạng. Malware duyệt qua danh sách và chọn một dịch vụ để chiếm đoạt. Bằng cách sử dụng nhóm netsvcs thay vì chỉ chọn một dịch vụ ngẫu nhiên, malware đảm bảo tính sẵn có của chức năng mạng (theo phụ thuộc).
+
+- Dòng 24-54: Đối với mỗi dịch vụ trong nhóm netsvcs, malware truy vấn đường dẫn ServiceDll dưới khóa Parameters. Sau đó, nó mở rộng bất kỳ biến môi trường nào (như %SystemRoot%) để lấy đầy đủ đường dẫn và lưu kết quả vào FileName.
+
+- Dòng 55-66: Malware xây dựng hai đường dẫn tạm thời để chuẩn bị cho quá trình nhiễm trùng. Sau đó, nó sao chép tệp nhị phân dịch vụ ban đầu thành OrigFileCopy (với phần mở rộng .txt) và thả một tệp DLL mới vào vị trí ban đầu của NewDllFile (với phần mở rộng .tmp).
+
+- Dòng 67-97: Malware mở một xử lý đối với tệp nhị phân dịch vụ ban đầu (FileName) và đọc 1024 byte cuối cùng của tệp vào một bộ đệm, sau đó quét bộ đệm để kiểm tra sự có mặt của szInfectSignature. Nếu ký hiệu được tìm thấy, vòng lặp tiến bộ đến dịch vụ tiếp theo trong nhóm netsvcs vì dịch vụ hiện tại đã được thay thế.
+
+- Dòng 98-113: Lấy một tài nguyên nhị phân từ phần khuôn mẫu của malware (thân của tệp DLL thay thế) và mở một xử lý đối với NewDllFile để chuẩn bị ghi nó vào đĩa.
+
+- Dòng 114-132: Malware thay đổi siêu dữ liệu của hệ thống tệp (đặc biệt là các dấu thời gian) để làm cho nó xuất hiện như thể tệp DLL mới được tạo vào ngày 18/02/2005 lúc 20:02:00. Sau đó, nó ghi dữ liệu tài nguyên vào tệp.
+
+- Dòng 133-145: Nối ký hiệu nhiễm trùng vào cuối tệp DLL mới, để ngăn chặn cùng một malware thay thế nó lại trong tương lai.
+
+- Dòng 146-167: Malware di chuyển tệp DLL mới (NewDllFile) từ thư mục tạm sang vị trí của nhị phân ban đầu (FileName). Nó đặt thuộc tính NTFS ẩn để người dùng phải thay đổi cài đặt mặc định của Explorer trước khi nhìn thấy tệp trong danh sách thư mục. Cuối cùng, nó xóa cả hai tệp tạm.
+
+#### Detecting Disk-based Hijacks
+
+Phát hiện việc chiếm đoạt dựa trên đĩa trong bộ nhớ không đơn giản như phương pháp dựa trên registry vì không có gì thay đổi ngoài nội dung của tệp. Nếu không tìm các hiện tượng tạo ra bởi tệp DLL mới khi nó tải (như kết nối, API hooks), bạn có thể trích xuất tất cả các DLL và so sánh chúng với các bản sao mẫu để xác định liệu có bị thay thế hay không. Hãy lưu ý rằng các băm của DLL được trích xuất từ bộ nhớ sẽ không khớp với các tệp trên đĩa, nhưng bạn có thể dựa vào các yếu tố khác như kích thước tệp, dấu thời gian biên dịch của đầu bảng PE và những yếu tố tương tự. Nếu có bất kỳ điều gì khác biệt, bạn có thể thực hiện phân tích mã để xác minh mục đích.
+
+### Revealing Hidden Services
+
+Như chúng ta đã đề cập trong chương trình, mã độc có thể ẩn các dịch vụ. Ví dụ, Blazgel (http://www.threatexpert.com/threats/backdoor-win32-blazgel .html) quét bộ nhớ của services.exe từ địa chỉ 0x300000 đến 0x5000000 để tìm dịch vụ mục tiêu. Nó tìm kiếm thành viên ServiceName trong cấu trúc _SERVICE_RECORD. Như được thể hiện trong Hình 12-3, khi tìm thấy một kết quả khớp, nó trừ đi 8 (xem lệnh lea eax, [esi-8]) vì thành viên ServiceName nằm ở offset 8 của cấu trúc _SERVICE_RECORD trên hệ thống 32 bit. Điều này cung cấp cho Blazgel một con trỏ tới địa chỉ cơ sở của cấu trúc _SERVICE_RECORD. Tiếp theo, nó ghi đè lên các giá trị Flink và Blink của các cấu trúc tiếp theo và trước đó, điều này hiệu quả làm cho dịch vụ mục tiêu "biến mất" khỏi tất cả các danh sách dịch vụ trên máy trạm.
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-02%20231132.png)
+
+Ở thời điểm này, người dùng không còn có thể dựa vào bất kỳ phương pháp nào đã được đề cập ở trên để liệt kê các dịch vụ trên máy trạm (ví dụ: MMC, lệnh sc query, PowerShell hoặc PsService.exe). Mặc dù dịch vụ ẩn vẫn đang chạy, SCM không có thông tin về sự tồn tại của nó, và do đó kết quả của hầu hết các công cụ phân tích sẽ bị ảnh hưởng. Như một ví dụ, hãy xem xét một hệ thống chạy dịch vụ Windows Security Center. Bạn có thể lấy thông tin về dịch vụ này bằng cách nhập lệnh sau: 
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-02%20231149.png)
+
+Bạn có thể thấy dịch vụ đang chạy. Bây giờ hãy dừng dịch vụ bằng lệnh "net stop" và sau đó truy vấn lại trạng thái của dịch vụ. Bạn sẽ thấy rằng dịch vụ đã được dừng lại (stopped state).
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-02%20231200.png)
+
+Hình 12-4 cho thấy cách kết quả của lệnh svcscan trước và sau khi dừng dịch vụ. Để tạo ra các biểu đồ này, bạn có thể thêm tùy chọn --output=dot vào lệnh Volatility của mình. Như bạn có thể thấy, trong cả hai trường hợp, dịch vụ wscsvc đều nằm giữa các dịch vụ WmiApSrv và wuauserv trong danh sách liên kết hai chiều.
+
+Bây giờ, để mô phỏng việc malware ẩn dịch vụ, bạn có thể sử dụng một chương trình mẫu để thực hiện việc tách dịch vụ khỏi danh sách. Cả mã nguồn và tệp thực thi đã được biên dịch cho chương trình này có sẵn tại đây: https://code.google.com/p/malwarecookbook/source/browse/trunk/17/10/UnlinkServiceRecord.zip. Đầu ra dưới đây cho thấy ngay sau khi tách dịch vụ wscsvc, lệnh sc query đưa ra một thông báo lỗi.
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-02%20231213.png)
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-02%20231227.png)
+
+Bởi vì dịch vụ wscsvc đã bị tách khỏi danh sách, nó không xuất hiện trong kết quả của lệnh sc query, danh sách MMC, hoặc danh sách các dịch vụ đang chạy do các ứng dụng bên thứ ba như PsService, GMER và Process Hacker tạo ra. Tuy nhiên, như thể hiện trong Hình 12-5, cấu trúc _SERVICE_RECORD cho wscsvc vẫn tồn tại trong bộ nhớ của services.exe. Hơn nữa, các giá trị Flink và Blink cho wscsvc vẫn trỏ đến WmiApSrv và wuauserv, nhưng không có gì trỏ đến wscsvc, do đó cách ly nó khỏi danh sách liên kết.
+
+Bạn có thể thu được một số điểm quan trọng từ cuộc thảo luận về dịch vụ ẩn này. Thứ nhất, dịch vụ vẫn nằm trong danh sách liên kết hai chiều ngay cả khi ở trạng thái dừng lại. Thứ hai, quy trình dịch vụ vẫn hoạt động ngay cả khi chương trình độc hại tách cấu trúc _SERVICE_RECORD của nó ra khỏi danh sách.
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-02%20231238.png)
+
+## Tổng quan
+
+Đã có nhiều năm trôi qua, kẻ tấn công đã sử dụng và lạm dụng kiến trúc dịch vụ theo nhiều cách khác nhau. Là một trong những cơ chế tồn tại chính mà ngay cả các nhóm mối đe dọa "nâng cao" cũng sử dụng, các nhà phân tích cần phải hiểu rõ về các dấu vết liên quan đến dịch vụ để hiệu quả trong việc giải quyết các trường hợp. Điều quan trọng là phải biết những giới hạn của các công cụ trực tiếp liệt kê dịch vụ và cách rootkit có thể ẩn mình. Bằng cách kết hợp các hiện vật trong bộ nhớ với các dấu vết tương tự trên đĩa, chẳng hạn như các hive của registry, bạn có thể chống lại các kỹ thuật ẩn mình và thường xuyên có cái nhìn tổng thể về cấu hình hiện tại của dịch vụ trên hệ thống nghi ngờ.

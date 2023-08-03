@@ -105,13 +105,163 @@ Nếu quá trình chính có vẻ hợp lệ (ví dụ: là explorer.exe hoặc 
 
 ![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-02%20223512.png)
 
+Tìm kiếm chuỗi con XX.XXX.5.140 dẫn đến một trường hợp của XX.XXX.5.140:8080/ zb/v_01_a/in/ tại địa chỉ 0x5500e9ae, điều này chắc chắn trông giống như một phần của một URL. Nếu bạn thực hiện một truy vấn đảo ngược với dlllist, bạn sẽ nhận thấy phạm vi địa chỉ này nằm trong một DLL có tên là ab.dll bắt đầu từ địa chỉ 0x55000000.
 
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-02%20223527.png)
 
+Tại điểm này, bạn có thể trích xuất DLL với dlldump và phân tích nó theo cùng một cách như một tập tin thực thi. Tuy nhiên, không may, các chuỗi không luôn luôn ánh xạ lại với DLL. Tất cả phụ thuộc vào cách thiết kế của phần mã độc hại. Thay vì trồng một URL văn bản thô trong tệp nhị phân, nó có thể được giải mã vào thời điểm chạy và được sao chép vào heap hoặc một khối bộ nhớ được cấp phát ảo khác trong không gian tiến trình. Hãy xem xét ví dụ tiếp theo, trong đó bạn tìm thấy một URL thú vị tại địa chỉ 0x75d82438 chỉ bằng cách tìm kiếm http:
 
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-02%20223540.png)
 
+Sau khi tiến hành điều tra kỹ càng hơn, địa chỉ 0x75d82438 không nằm trong bất kỳ DLL nào đang được tải. Sự xuất hiện của URL tại vị trí này không cung cấp cho bạn thông tin nào hơn về mục đích thực sự của kết nối so với việc thấy địa chỉ IP tương ứng (XXX.134.176.126) trong kết quả của các plugin về sockets hoặc connections. Tuy nhiên, bạn vẫn có một số thông tin hữu ích. Và dù việc này có đòi hỏi tính kiên nhẫn, đôi khi bạn có thể đạt được thành công tốt bằng cách tìm kiếm các con trỏ tới địa chỉ đã tham chiếu. Trước khi làm điều đó, bạn phải chuyển đổi số nguyên 0x75d82438 thành các byte riêng lẻ và đảm bảo chúng ở đúng thứ tự cho hệ điều hành đích. Vì chúng ta đang điều tra trên Windows, thường chạy trên phần cứng little endian, tiêu chí tìm kiếm sẽ có dạng như sau:
 
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-02%20223553.png)
 
+Dựa vào kết quả, có vẻ như có một con trỏ tới địa chỉ 0x75d82438 được lưu tại địa chỉ 0x75d47500. Sau đó, bạn có thể giải mã mã lệnh xung quanh con trỏ đã lưu để xem nó được sử dụng như thế nào. Lưu ý rằng một số byte đã được trừ đi để hiển thị các lệnh trước và sau địa chỉ 0x75d47500.
 
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-02%20223614.png)
 
+Con trỏ tới URL (0x75d82438) đang được truyền làm tham số thứ hai cho hàm tại địa chỉ 0x75d4ace9. Vì vậy, bạn có thể giải mã hàm đó để xác định nơi và, quan trọng hơn, cách URL đang được sử dụng.
 
+>**LƯU Ý**<br> Hãy lưu ý rằng bạn không phải luôn luôn tìm kiếm chỉ các chuỗi. Ví dụ, thay vì để "badsite.com" (chuyển thành địa chỉ IP 12.34.56.78) hiển thị trong chương trình và sau đó thực hiện một DNS lookup trong thời gian chạy, kẻ tấn công có thể mã hóa một số nguyên cứng vào chương trình. Đoạn mã sau cho thấy cách chuyển đổi địa chỉ IP từ chuỗi địa chỉ dạng dot-quad thành một số nguyên trong mạng-byte order.
+```
+$ python
+>>> import socket
+>>> import struct
+>>> struct.unpack(">I", socket.inet_aton("12.34.56.78"))[0]
+203569230
+```
+>Trong trường hợp này, bạn nên tìm kiếm trong bộ nhớ giá trị bốn byte là 203569230.
 
+### Inactive Sockets and Connections
+
+Thay vì duyệt các linked-lists trong không gian địa chỉ ảo (như các lệnh sockets và connections làm), các lệnh sockscan và connscan quét không gian vật lý của bộ nhớ để tìm kiếm các phân bổ kernel pool với các thẻ, kích thước và loại (paged hoặc nonpaged) phù hợp, như đã mô tả trong Chương 5. Do đó, bằng cách sử dụng connscan và sockscan, bạn có thể xác định các sockets và connections có thể đã được sử dụng trong quá khứ - vì bạn cũng tìm kiếm trong các khối bộ nhớ được giải phóng và hủy bỏ. Dưới đây là một ví dụ: (Tiếng Anh bị trích dẫn không rõ nghĩa, có thể bạn muốn xem xét lại nội dung này).
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-02%20223646.png)
+
+Có một mục cuối cùng có owning PID là số không (0), đây không phải là một số hợp lệ cho một định danh quá trình. Điều này không phải là công việc của một rootkit thay đổi PID thành số không hoặc bất cứ điều gì như vậy; đây là một cấu trúc dư thừa đã bị ghi đè một phần. Bạn có thể nhận biết rằng tại một thời điểm nó chứa thông tin hợp lệ vì địa chỉ IP nguồn, cổng nguồn, địa chỉ IP đích và cổng đích đều có vẻ hợp lệ. Có khả năng hoàn toàn lọc bỏ các PID không hợp lệ, nhưng điều đó sẽ làm mất mục đích của công cụ quét - và bạn sẽ bỏ qua một gợi ý có thể quan trọng rằng máy cục bộ đã liên hệ với một địa chỉ IP (12.206.53.84) trên cổng 443.
+
+>LƯU Ý<br>
+Trong một số trường hợp, nhiều trường trong kết quả đầu ra là không hợp lệ. Ví dụ, bạn có thể có một hoặc nhiều kết nối với PIDs và cổng không hợp lệ, nhưng địa chỉ IP là hợp lệ. Trong các trường hợp khác, các địa chỉ IP bị lỗi, nhưng các cổng và PIDs trông tốt. Một lần nữa, đây là sự đánh đổi của việc quét brute force thông qua các khối bộ nhớ đã được giải phóng và không được giải phóng so với đi bộ qua danh sách kết nối hoạt động (trong trường hợp này, tất cả các trường nên hợp lệ, nhưng bạn không có cơ hội phát hiện hoạt động trong quá khứ).<br>
+Một cách để giảm thiểu một số tiếng ồn liên quan đến các trường không hợp lệ là rút ra danh sách địa chỉ IP của máy từ registry hoặc thu thập nó trong quá trình phản hồi trực tiếp bằng cách chạy lệnh ipconfig. Sau đó, điều chỉnh đầu ra của bạn để chỉ hiển thị các kết nối mà địa chỉ cục bộ hoặc từ xa nằm trong danh sách các IP.
+
+## Hidden Connections
+
+Bạn có nhiều cách để ẩn cổng lắng nghe và các kết nối hoạt động trên hệ thống thời gian thực. Bảng 11-1 tóm tắt một số khả năng và thảo luận về cách bạn có thể phát hiện chúng trong bộ nhớ bằng cách sử dụng Volatility.
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-03%20165345.png)
+
+### IP Packets and Ethernet Frames
+
+Phần trước đã thảo luận về khả năng của các tác giả malware viết các trình điều khiển NDIS riêng của họ, từ đó tránh Winsock2 APIs và các tạo vật liên quan. Tuy nhiên, ngay cả trong trường hợp này, họ vẫn phải xây dựng các gói tin IP và các khung Ethernet trong RAM trước khi gửi chúng qua dây. Cả hai loại dữ liệu này phải tuân theo một tiêu chuẩn bao gồm việc sử dụng một tiêu đề có cấu trúc phổ biến và các giá trị hằng số có thể dự đoán (ví dụ: phiên bản IP, độ dài tiêu đề IP). Do đó, việc quét qua bộ nhớ và tìm các tiêu đề, thường là ngay sau đó là các tải liệu, khá dễ dàng.
+
+Bản thực hiện sớm nhất là plugin có tên linpktscan (Linux packet scanner) được viết cho Thử thách Pháp lý DFRWS 2008 (xem http://sandbox.dfrws.org/2008/Cohen_Collet_Walters/Digital_Forensics_Research_Workshop_2.pdf). Plugin này tìm kiếm các gói tin IP có checksum hợp lệ, cho phép các tác giả định danh một số gói tin trở lại hệ thống mục tiêu, cụ thể là các gói mang các phần của các tệp zip và truyền tệp FTP đã bị đánh cắp.
+
+Gần đây hơn, Jamaal Speights đã viết một plugin có tên ethscan (http://jamaaldev.blogspot.com/2013/07/ethscan-volatility-memory-forensics.html) để tìm các khung Ethernet và do đó các gói tin IP và tải liệu được bao gói. Dưới đây là ví dụ về cách chạy plugin với tùy chọn -C để lưu dữ liệu vào tập tin out.pcap, sau đó bạn có thể phân tích với công cụ bên ngoài như Wireshark hoặc Tcpdump.
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-02%20223702.png)
+
+Đầu ra sau đây cho thấy một yêu cầu DNS IPv6 đã khôi phục được từ hệ thống Linux. Bởi vì DNS (và bất kỳ lưu lượng nào, nói chung) là một hoạt động tương đối nhanh chóng, bạn khó có thể chụp bộ nhớ trong khi socket UDP đang hoạt động. Ngay cả khi bạn đã làm được điều đó, đầu ra của lệnh sockets không hiển thị cho bạn biết máy chủ tên miền được giải quyết là gì. Do đó, ethscan là một nguồn tài nguyên cực kỳ quý giá. Plugin đã khôi phục được máy chủ tên miền mong muốn: itXXXn.org.
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-02%20223713.png)
+
+>GHI CHÚ<br>
+Ngoài ethscan của Volatility, có nhiều công cụ khác có thể lấy dữ liệu mạng từ các tệp nhị phân tùy ý như bộ nhớ được sao lưu. Dưới đây là một số ví dụ:
+>- Bulk Extractor của Simson Garfinkel: https://github.com/simsong/bulk_extractor
+>- The Network Appliance Forensic Toolkit (NAFT) của Didier Stevens: http://blog.didierstevens.com/2012/03/12/naft-release/
+>- CapLoader của Netresec: http://www.netresec.com/?page=CapLoader
+
+### DKOM Attacks
+
+Các cuộc tấn công DKOM trực tiếp vào đối tượng Kernel không đe dọa bằng cách như vậy đối với các đối tượng socket và connection. Nghĩa là bạn có thể không thấy mã độc cố gắng gỡ bỏ hoặc ghi đè lên một _ADDRESS_OBJECT để ẩn một socket đang lắng nghe hoặc một _TCPT_OBJECT để ẩn một kết nối đang hoạt động. Trong quá trình thử nghiệm của chúng tôi, được trình bày trong Recipe 18-3 của Malware Analyst’s Cookbook, chúng tôi đã phát hiện rằng bạn không nên ghi đè lên những đối tượng này, nếu không, khả năng của một quá trình giao tiếp qua mạng sẽ bị hỏng.
+
+Tuy nhiên, bạn có thể thực hiện DKOM lên dữ liệu không thiết yếu như các pool tag (mà tồn tại ngoài cấu trúc mục tiêu) để ẩn khỏi sockscan và connscan.
+
+## Raw Sockets and Sniffers
+
+Nếu một quy trình đang chạy với quyền quản trị viên, nó có thể bật raw sockets (xem http://msdn.microsoft.com/en-us/library/ms740548%28VS.85%29.aspx) từ chế độ người dùng bằng cách sử dụng API Winsock2. Raw sockets cho phép các chương trình truy cập dữ liệu lớp giao vận cơ bản (chẳng hạn như tiêu đề IP hoặc TCP), điều này có thể cho phép hệ thống làm giả hoặc giả mạo gói tin. Ngoài ra, mã độc có thể sử dụng raw sockets ở chế độ thu gom để bắt mật khẩu được truyền tải bởi máy nhiễm và các máy khác trên cùng mạng con.
+
+>GHI CHÚ<br>
+Hai yếu tố giảm thiểu rủi ro của raw sockets. Đầu tiên, bắt đầu từ Windows XP Service Pack 2, Windows ngăn các quy trình gửi dữ liệu TCP qua raw sockets và không cho phép các gói dữ liệu UDP được gửi bằng cách sử dụng địa chỉ nguồn không hợp lệ. Thứ hai, việc bắt các gói tin trên các mạng chuyển mạch hoặc kết nối không dây được mã hóa là khó (hoặc không thể thực hiện được).
+
+### Creating Raw Sockets
+
+Bạn có thể tạo một socket chế độ promiscuous bằng cách sử dụng Winsock2 với các bước sau đây:
+
+1. Tạo một socket raw bằng cách chỉ định các cờ SOCK_RAW và IPPROTO_IP cho hàm socket:
+
+        SOCKET s = socket(AF_INET, SOCK_RAW, IPPROTO_IP);
+
+2. Đặt cổng là 0 khi khởi tạo cấu trúc sockaddr_in mà bạn truyền vào hàm bind. Trong trường hợp này, cổng 0 chỉ đơn giản là không cần thiết.
+
+        struct sockaddr_in sa;
+        struct hostent *host = gethostbyname(the_hostname);
+        
+        memset(&sa, 0, sizeof(sa));
+        memcpy(&sa.sin_addr.s_addr,
+            host->h_addr_list[in],
+            sizeof(sa.sin_addr.s_addr));
+        
+        sa.sin_family = AF_INET;
+        sa.sin_port = 0;
+        
+        bind(s, (struct sockaddr *)&sa, sizeof(sa));
+
+3. Sử dụng hàm WSAIoctl hoặc ioctlsocket với cờ SIO_RCVALL để bật chế độ tiếp nhận mọi gói tin (hay còn gọi là "chế độ sniffing") cho NIC được liên kết với socket:
+
+        int buf;
+        
+        WSAIoctl(s, SIO_RCVALL, &buf, sizeof(buf),
+                        0, 0, &in, 0, 0);
+
+### Detecting Raw Sockets
+
+Trên máy Windows đang hoạt động, bạn có thể sử dụng công cụ có tên promiscdetect (xem http:// ntsecurity.nu/toolbox/promiscdetect/) để phát hiện sự hiện diện của một card mạng trong chế độ nhận mọi gói tin (promiscuous mode). Để phát hiện chúng trong một bản sao trích xuất bộ nhớ, bạn có thể sử dụng các lệnh sockets hoặc handles trong Volatility. Bạn thậm chí không cần một plugin đặc biệt! Các dấu vết còn lại trong bộ nhớ từ việc thực hiện ba bước trước đó sẽ nổi bật như một vết loét. Hãy xem liệu bạn có nhận ra quy trình với raw socket trong bản sao trích xuất bộ nhớ này của một hệ thống bị nhiễm Gozi (còn được gọi là Ordergun và UrSniff) hay không.
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-02%20223741.png)
+
+Dễ dàng quá! Tóm lại, các tiến trình mở các raw socket, có hoặc không có chế độ promiscuous, sẽ có một socket được gắn với cổng 0 của giao thức 0 và một handle mở đến \Device\RawIp\0.
+
+## Next Generation TCP/IP Stack
+
+Bắt đầu từ Vista và Windows Server 2008, Microsoft giới thiệu Next Generation TCP/IP Stack (xem http://technet.microsoft.com/en-us/network/bb545475.aspx). Mục tiêu chính của nó là tăng cường hiệu suất cho cả IPv4 và IPv6. Để làm được điều này, hầu hết kernel module tcpip.sys đã được viết lại hoàn toàn; và do những thay đổi mạnh mẽ đó, cách chúng ta khôi phục các artifacts liên quan đến mạng từ bộ nhớ cần phải thích ứng.
+
+**Cấu trúc dữ liệu**
+
+Những biến _AddrObjTable và _TCBTable mà trước đây trỏ tới đầu các cấu trúc sockets và connections hoạt động đã bị loại bỏ. Ngoài ra, Microsoft đã thiết kế lại và đổi tên các cấu trúc socket và connection, và chuyển đổi các nhãn kernel pool cho các phân bổ lưu trữ chúng. Đoạn kết quả sau đây thể hiện các cấu trúc mạng mà Volatility định nghĩa cho các hệ thống 64-bit Windows 7: 
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-02%20223756.png)
+
+Phần lớn các mô tả thành viên phù hợp với các cấu trúc được miêu tả trước đây cho Windows XP và 2003.
+
+### Working Backward from netstat.exe
+
+Dù có thay đổi gì từ một phiên bản Windows sang phiên bản khác, điều mà bạn có thể chắc chắn là netstat.exe sẽ luôn hoạt động trên một máy tính sống. Do đó, xác định nơi mà netstat.exe thu thập thông tin là một bước khởi đầu tốt để tìm các hiện vật liên quan đến mạng trong bộ nhớ. Đây là cách chúng tôi thực hiện khi phát triển khả năng của Volatility để tìm kiếm các cấu trúc socket và kết nối trong các bản sao bộ nhớ từ hệ điều hành Vista và các phiên bản sau đó.
+
+Cụ thể, chúng tôi đã đảo ngược mã của các API và các mô-đun (cả từ chế độ người dùng và chế độ kernel) liên quan đến việc tạo ra hoạt động mạng trên hệ thống đang chạy. Mọi thứ bắt đầu khi netstat.exe gọi InternetGetTcpTable2 từ iphlpapi.dll. Luồng thực thi dẫn về tcpip.sys trong một hàm có tên là TcpEnumerateAllConnections. Để biết thêm thông tin về cách chúng tôi theo dõi các mối quan hệ này, hãy xem http://mnin.blogspot.com/2011/03/volatilitys-new-netscan-module.html.
+
+### Volatility’s Netscan Plugin
+
+Sau khi xác định nguồn thông tin chính xác mà netstat.exe in trên máy sống, chúng tôi đã có thể xây dựng một plugin của Volatility để truy cập trực tiếp vào dữ liệu trong RAM. Khả năng này được thực hiện bằng plugin netscan. Nó sử dụng phương pháp quét pool (xem Chương 5) để xác định các cấu trúc _TCP_ENDPOINT, _TCP_LISTENER và _UDP_ENDPOINT trong bộ nhớ. Dưới đây là ví dụ về đầu ra của nó trên một máy Windows 7 64-bit:
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-02%20223812.png)
+
+Trong đầu ra, một số dòng hiển thị dấu gạch ngang (-) thay vì địa chỉ IP cục bộ hoặc từ xa. Dấu gạch ngang cho biết thông tin không thể truy cập được trong bộ nhớ bị rò rỉ. Khác với cấu trúc của XP và 2003 lưu thông tin địa chỉ IP trong cấu trúc thực tế, các cấu trúc của Vista và phiên bản sau lưu trữ con trỏ đến con trỏ. Do đó, để truy cập dữ liệu, Volatility phải giải tham chiếu nhiều con trỏ trong bộ nhớ ảo - một đường dẫn thường dễ bị hỏng nếu một hoặc nhiều trang trên đường đi được đẩy vào đĩa.
+
+>GHI CHÚ<br>
+Plugin netscan sử dụng cùng phương pháp quét pool-tag như sockscan và connscan. Như đã thảo luận trước đó trong chương, điều này có thể dẫn đến kết quả sai và dữ liệu không hợp lệ vì bạn đang quét các khối bộ nhớ đã giải phóng và hủy bỏ trong không gian vật lý. Xem lại các ghi chú trước đó về cách giảm thiểu kết quả sai (tức là lọc theo địa chỉ IP) và triển khai kết nối trở lại mã để xác minh.
+
+>GHI CHÚ<br>
+The Next Generation TCP/IP stack hỗ trợ dual-stack sockets. Nghĩa là khi bạn tạo một socket trên hệ thống Vista và sau này, nó áp dụng cho cả IPv4 và IPv6 trừ khi bạn yêu cầu rõ ràng chỉ IPv4 khi tạo. Do đó, netscan có thể báo cáo các kết nối cho cả hai giao thức.
+
+### Partition Tables
+
+Một trong những cách mà Microsoft tăng cường hiệu suất trong TCP/IP stack đã được thiết kế lại là bằng cách chia công việc thành nhiều lõi xử lý. Một biến toàn cục trong module tcpip.sys có tên là PartitionTable lưu trữ một con trỏ tới một cấu trúc _PARTITION_TABLE, chứa một mảng các _PARTITION. Số lượng chính xác của các phân vùng này phụ thuộc vào số lõi CPU tối đa mà hệ thống có thể hỗ trợ. Trong quá trình khởi động cho module tcpip.sys, một hàm có tên TcpStartPartitionModule cấp phát bộ nhớ cho các cấu trúc phân vùng và khởi tạo chúng. Được cho rằng, mỗi lõi xử lý đảm nhận việc xử lý các kết nối trong phân vùng của nó; và khi một tiến trình hoặc trình điều khiển yêu cầu kết nối, chúng được thêm vào phân vùng có tải nhẹ nhất.
+
+Hình 11-4 thể hiện cách phân tích thông tin kết nối dựa trên dữ liệu trong bảng phân vùng.
+
+Một _PARTITION chứa ba cấu trúc _RTL_DYNAMIC_HASH_TABLE – một cho các kết nối ở các trạng thái sau: thiết lập, SYN gửi (đang chờ đợi đầu xa xác nhận) và time wait (sắp trở thành đã đóng). Các bảng băm động trỏ tới danh sách kép các cấu trúc kết nối, như _TCP_ENDPOINT. Do đó, khá dễ dàng để bắt đầu từ một biến đã biết (tcpip!PartitionTable) trong bộ nhớ và thu thập tất cả thông tin kết nối hiện tại.
+
+>**GHI CHÚ**<br>
+Có thể khiến bạn ngạc nhiên, nhưng số lượng phân vùng phụ thuộc vào số lượng bộ xử lý tối đa, chứ không phải số lượng bộ xử lý hoạt động (ví dụ, một hệ thống có thể hỗ trợ lên đến 16 CPU, nhưng chỉ có một CPU được cài đặt). Chúng ta biết điều này vì hàm tcpip!TcpStartPartitionModule hoạt động theo cách sau đây:
+>![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-02%20223827.png)

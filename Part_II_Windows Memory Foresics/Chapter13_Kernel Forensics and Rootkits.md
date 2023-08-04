@@ -51,3 +51,70 @@ Hành động đơn giản của việc tải một module kernel dẫn đến v
 Bây giờ bạn đã biết những API cần thiết cho mỗi trong những phương pháp này, bạn có thể nhận ra chúng khi phân tích các cuộc gọi hàm đã được nhập vào của một ứng dụng.
 
 ### Enumerating Modules on Live Systems
+
+Việc làm quen với cách mà các công cụ trực tiếp liệt kê các module kernel là rất quan trọng để hiểu cách chúng thường bị xuyên tạc. Dưới đây là một danh sách các nguồn tài nguyên có sẵn:
+
+- Process Explorer: Nếu bạn nhấp vào tiến trình "System" và chọn Xem ➪ Xem bảng dưới cùng ➪ DLLs, bạn sẽ thấy danh sách các module kernel hiện đang được tải. Hình 13-2 hiển thị hình ảnh về cách nó xuất hiện.
+
+  ![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-03%20233748.png)
+
+- Windows API: Hàm EnumDeviceDrivers (xem K32EnumDeviceDrivers) có thể lấy được địa chỉ tải của mỗi module kernel. Bên trong, những API trợ giúp này gọi NtQuerySystemInformation.
+
+- Windows Management Instrumentation (WMI): Bạn có thể sử dụng lớp Win32_SystemDriver để liệt kê các trình điều khiển hệ thống. Lưu ý rằng lớp này được kế thừa từ Win32_BaseService, do đó, nó thực tế là tham khảo registry (không phải NtQuerySystemInformation) để thu thập tập con các dịch vụ đã được cài đặt tải các module kernel.
+
+- Nirsoft: Ứng dụng GUI DriverView (http://www.nirsoft.net/utils/driverview.html) của Nirsoft hiển thị một danh sách các module đã được tải bằng cách gọi NtQuerySystemInformation.
+
+- Native API: Chương trình C hoặc C++ có thể gọi trực tiếp NtQuerySystemInformation với lớp SystemModuleInformation để thu thập danh sách các module kernel đã được tải. API này, trên đó rất nhiều công cụ khác dựa vào, tham chiếu đến danh sách liên kết kép của các cấu trúc KLDR_DATA_TABLE_ENTRY mô tả trong Hình 13-1.
+
+## Modules in Memory Dumps
+
+Volatility được trang bị đầy đủ để tìm, báo cáo và trích xuất các module kernel từ bộ nhớ. Dưới đây là danh sách các plugin mà bạn sẽ sử dụng phổ biến nhất cho các hành động này:
+
+- modules: Plugin này đi qua danh sách liên kết kép của các cấu trúc dữ liệu siêu dữ liệu được trỏ đến bởi PsLoadedModuleList. Vì các module mới được tải luôn được thêm vào cuối danh sách, plugin này có ưu điểm hiển thị quan hệ thời gian tương đối giữa các module (nghĩa là bạn có thể biết thứ tự mà các module đã được tải).
+
+- modscan: Plugin này sử dụng quét pool tag qua không gian địa chỉ vật lý, bao gồm bộ nhớ đã giải phóng/hủy, để tìm kiếm MmLd (pool tag dữ liệu siêu dữ liệu của module). Nó cho phép bạn tìm thấy cả các module đã bị mất liên kết và các module đã được tải trước đó.
+
+- unloadedmodules: Đối với mục đích gỡ lỗi, kernel duy trì một danh sách các module đã được gỡ bỏ gần đây. Bên cạnh tên module, nó lưu trữ các dấu thời gian để chỉ ra chính xác khi nào chúng đã bị gỡ bỏ và các vị trí trong bộ nhớ kernel chúng đã chiếm giữ.
+
+- moddump: Plugin này trích xuất một hoặc nhiều module kernel mà bạn xác định bằng tên hoặc địa chỉ cơ sở. Nó chỉ có thể trích xuất các module đang được tải hiện tại có tiêu đề PE hợp lệ.
+
+### Ordered List of Active Modules
+
+Đầu ra sau đây hiển thị một ví dụ về việc sử dụng plugin modules. Quan trọng là hiểu sự khác biệt giữa các cột Offset(V) và Base. Cột trước đó (hiển thị ở cột bên trái cùng) là địa chỉ ảo của cấu trúc dữ liệu siêu dữ liệu KLDR_DATA_TABLE_ENTRY. Còn cột sau đó là địa chỉ cơ sở (cũng trong bộ nhớ ảo) của đầu của tiêu đề PE của module. Do đó, trên hệ thống cụ thể này, bạn sẽ mong đợi tìm thấy chữ ký MZ cho module NT, ntoskrnl.exe, tại địa chỉ 0xfffff80002852000.
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-03%20233806.png)
+
+The NT module là module đầu tiên tải và tiếp theo là hal.dll (hardware abstraction layer). Điều này hợp lý vì cả hai là các thành phần chính của hệ điều hành cần bắt đầu sớm. Sau đó, bạn sẽ thấy các trình điều khiển liên quan đến các dịch vụ cụ thể bắt đầu tự động khi khởi động, chẳng hạn như trình điều khiển giao tiếp bộ gỡ lỗi kernel (kdcom.dll) và trình điều khiển Bluetooth (BthEnum.sys). Cuối cùng của danh sách hiển thị module mới nhất đã được tải, PROCEXP152.SYS, liên quan đến SysInternals Process Explorer—mà người dùng đã khởi động tương tác.
+
+Nếu hệ thống bị nhiễm rootkit kernel, bạn sẽ thấy một mục mới cho module độc hại được thêm vào cuối danh sách (giả sử bạn thu thập bộ nhớ trước khi khởi động lại tiếp theo và rootkit không cố gắng ẩn cấu trúc dữ liệu siêu dữ liệu của nó).
+
+### Brute Force Scanning for Modules
+
+Đầu ra của plugin modscan giống như cái bạn vừa thấy. Tuy nhiên, có một số sự khác biệt chính:
+
+- Bởi vì cấu trúc dữ liệu siêu dữ liệu của module được tìm thấy bằng cách quét qua không gian địa chỉ vật lý, cột bên trái, Offset(P), hiển thị một phần bù vật lý thay vì một địa chỉ trong bộ nhớ ảo.
+
+- Các module xuất hiện theo thứ tự mà chúng được tìm thấy, không phải theo thứ tự chúng được tải.
+
+Tất nhiên, vì modscan cũng kiểm tra các khối bộ nhớ được giải phóng và hủy, bạn có thể tìm thấy các module không được liên kết và đã được tải trước đó. Dưới đây là một ví dụ về đầu ra:
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-03%20233826.png)
+
+### Recently Unloaded Modules
+
+Đầu ra dưới đây hiển thị một ví dụ về plugin unloadedmodules. Như đã đề cập trước đó, kernel duy trì danh sách này cho mục đích gỡ lỗi. Ví dụ, một module có thể đặt một Deferred Procedure Call (DPC) hoặc lên lịch một bộ đếm thời gian, nhưng sau đó gỡ bỏ mà không hủy bỏ chúng. Do đó, khi thủ tục được kích hoạt, hàm xử lý dự kiến ​​không còn tồn tại trong bộ nhớ. Điều này có thể gây ra vấn đề con trỏ treo và dẫn đến hậu quả không thể đoán trước. Nếu kernel không duy trì danh sách này của các module đã được gỡ bỏ gần đây và các phạm vi địa chỉ mà chúng đã chiếm giữ, việc xác định module nào gây lỗi sẽ gần như không thể.
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-03%20233839.png)
+
+
+Danh sách các module đã được gỡ bỏ cũng rất hữu ích cho việc điều tra pháp y và phân tích mã độc, đặc biệt là khi các rootkit cố gắng gỡ bỏ nhanh chóng (tức là tiếp cận vào, tiếp cận ra). Như đã thấy trong ví dụ dưới đây từ một biến thể Rustock.C, bạn không thể tìm thấy module xxx.sys trong danh sách các module hoạt động hoặc thông qua quét theo pool tag. Tuy nhiên, trong một cấu trúc dữ liệu hoàn toàn khác, kernel vẫn ghi nhớ rằng module độc hại đã từng được tải.
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-03%20233852.png)
+
+Đáng tiếc là vì module xxx.sys thực sự đã được gỡ bỏ, bạn không còn mong đợi trích xuất nó ra khỏi bộ nhớ. Tuy nhiên, ít nhất bạn có một dấu thời gian được liên kết với hoạt động đó mà bạn có thể sử dụng trong các cuộc điều tra dựa trên dòng thời gian, và bạn cũng có tên tập tin trên đĩa, vì vậy bạn có thể cố gắng khôi phục nó từ hệ thống tập tin.
+
+### Extracting Kernel Modules
+
+Khi một module kernel vẫn được tải vào bộ nhớ, bạn có thể trích xuất nó để phân tích tĩnh bằng plugin moddump. Dưới đây là các tùy chọn dòng lệnh có sẵn:
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-03%20233906.png)

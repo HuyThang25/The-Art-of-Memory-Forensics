@@ -118,3 +118,74 @@ Danh sách các module đã được gỡ bỏ cũng rất hữu ích cho việc
 Khi một module kernel vẫn được tải vào bộ nhớ, bạn có thể trích xuất nó để phân tích tĩnh bằng plugin moddump. Dưới đây là các tùy chọn dòng lệnh có sẵn:
 
 ![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-03%20233906.png)
+
+Để trích xuất tất cả các module hiện đang được tải, chỉ cần cung cấp một đường dẫn đến thư mục đầu ra mong muốn của bạn, như sau:
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-03%20233917.png)
+
+Lưu ý rằng tên của tệp đầu ra là driver.ADDR.sys, trong đó ADDR là địa chỉ cơ sở của module trong bộ nhớ kernel. Bởi vì chỉ có một module có thể chiếm một địa chỉ cụ thể tại một thời điểm, quy ước đặt tên này đảm bảo rằng các tên tệp đầu ra là duy nhất (so với việc dựa vào tên của module, gây ra xung đột).
+
+Trong ví dụ tiếp theo, chúng ta trích xuất các module bằng cách sử dụng biểu thức chính quy không phân biệt chữ hoa/thường. Tiêu chí tcp khớp với hai module, tcpip.sys và tcpipreg.sys.
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-03%20233928.png)
+
+Mặc dù việc tìm kiếm bằng biểu thức chính quy rất tiện lợi, hãy nhớ rằng có những trường hợp bạn sẽ không có tên để tiến hành tìm kiếm (ví dụ, nếu cấu trúc dữ liệu siêu dữ liệu bị ghi đè hoặc nếu bạn tìm thấy một tiêu đề PE trong một phân bổ pool kernel ẩn danh). Trong những trường hợp này, bạn có thể cung cấp địa chỉ cơ sở (nơi bạn thấy chữ ký MZ) và moddump sẽ thực hiện việc trích xuất. Ví dụ dưới đây giả định rằng có một tệp PE tồn tại tại địa chỉ 0xfffff88003800000:
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-03%20233941.png)
+
+Nếu bạn dự định tải module đã trích xuất vào IDA Pro để phân tích tĩnh, hãy nhớ một điều: địa chỉ ImageBase trong tiêu đề PE cần phải được thay đổi sao cho khớp với địa chỉ tải thực tế của nó trong bộ nhớ kernel. Nói cách khác, bạn nên sử dụng 0xfffff88003800000 cho ví dụ cuối cùng đã hiển thị. Dưới đây là cách bạn có thể làm điều này bằng cách sử dụng module Python pefile từ https://code.google.com/p/pefile:
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-03%20234003.png)
+
+Cải tiến đơn giản này cung cấp cho IDA Pro ngữ cảnh bổ sung cần thiết để hiển thị đúng cuộc gọi hàm tương đối, nhảy và tham chiếu chuỗi. Tùy thuộc vào trạng thái của bảng địa chỉ nhập của tệp nhị phân, bạn cũng có thể cần sử dụng plugin impscan của Volatility để tạo các nhãn mà bạn có thể áp dụng vào cơ sở dữ liệu IDA. Bạn sẽ thấy một ví dụ về việc sử dụng impscan sau trong chương trình (xem cũng "Recipe 16-8: Scanning for Imported Functions with ImpScan" trong "Malware Analyst’s Cookbook").
+
+## Threads in Kernel Mode
+
+Khi các module kernel tạo các luồng mới bằng PsCreateSystemThread, quy trình System (PID 4 trên XP và phiên bản sau) trở thành chủ sở hữu của luồng. Nói cách khác, quy trình System là nơi mặc định cho các luồng bắt đầu trong chế độ kernel. Bạn có thể khám phá điều này bằng Process Explorer và thấy rằng địa chỉ bắt đầu của các luồng thuộc quy trình System là các offset trong các module kernel như ACPI.sys và HTTP.sys (xem Hình 13-3).
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-03%20234018.png)
+
+Khi phân tích qua một bản sao bộ nhớ, bạn có thể phân biệt các luồng hệ thống này khác biệt với những luồng khác dựa trên các yếu tố sau:
+- Giá trị _ETHREAD.SystemThread là 1.
+- Thành viên _ETHREAD.CrossThreadFlags có cờ PS_CROSS_THREAD_FLAGS_SYSTEM được thiết lập.
+- Quy trình sở hữu có PID 4.
+
+Thông tin này có thể giúp bạn tìm các gia đình mã độc như Mebroot và Tigger, cố gắng che giấu sự hiện diện của chúng trong kernel. Khi các module rootkit ban đầu tải, chúng phân bổ một pool bộ nhớ kernel, sao chép mã thực thi vào pool và gọi PsCreateSystemThread để bắt đầu thực thi khối mã mới. Sau khi luồng được tạo, module có thể gỡ bỏ. Những hành động này giúp rootkit tồn tại bằng cách thực thi các luồng từ các pool bộ nhớ không được đánh dấu. Tuy nhiên, điều này tạo ra một dấu vết rõ ràng cho việc pháp y cho vì bạn có một luồng với địa chỉ bắt đầu trỏ đến một khu vực không xác định của bộ nhớ kernel, trong đó không tồn tại module đã biết.
+
+### Tigger’s Kernel Threads
+
+Hình 13-4 cho thấy các luồng được sở hữu bởi quy trình System của máy bị nhiễm Tigger. Bạn có thể nhận thấy sự hiện diện của bốn luồng mới mà không tồn tại trong Hình 13-3. Process Explorer chỉ hiển thị địa chỉ bắt đầu của luồng thay vì định dạng thông thường như driverName.sys+0xabcd, bởi vì địa chỉ bắt đầu không nằm trong phạm vi bộ nhớ của bất kỳ module nào đã được tải.
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-03%20234039.png)
+
+### Detecting Orphan Threads
+
+Các plugin threads có thể giúp bạn xác định những nỗ lực ẩn mình theo cách đã mô tả. Plugin này liệt kê các module đã được tải bằng cách đi qua danh sách liên kết gấp đôi và ghi lại địa chỉ cơ sở và kích thước của chúng. Sau đó, plugin quét các luồng hệ thống và kiểm tra xem giá trị _ETHREAD.StartAddress có nằm trong phạm vi của một trong các module hay không. Nếu plugin không thể ghép cặp một luồng với driver sở hữu của nó, nó giả định rằng luồng đó đã bị gỡ bỏ hoặc ẩn. Vì lý do này, các luồng này cũng được biết đến với cái tên "orphan threads" - những luồng mà không còn sở hữu. Dưới đây là đầu ra ví dụ cho cách các orphan threads xuất hiện trong bản sao bộ nhớ. Bạn sẽ thấy thẻ OrphanThread được hiển thị cũng như UNKNOWN bên phải địa chỉ bắt đầu (0xf2edd150).
+
+![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-08-03%20234109.png)
+
+Nếu bạn nghi ngờ rằng một kernel rootkit tồn tại trên hệ thống mà bạn đang điều tra, nhưng bạn không thể tìm thấy bằng chứng hỗ trợ bằng các plugin modules hoặc modscan, chúng tôi đề xuất kiểm tra các luồng mồ côi (orphan threads). Tuy nhiên, hãy lưu ý rằng địa chỉ bắt đầu của luồng sẽ trỏ đến một hàm bên trong tệp PE độc hại, chứ không phải là địa chỉ cơ sở của tệp PE. Do đó, bạn có thể cần phải thực hiện một số tính toán để tìm chữ ký MZ (đánh dấu bắt đầu của tệp PE). Gần cuối chương, bạn sẽ thấy một kịch bản volshell có thể quét ngược từ một địa chỉ cụ thể để tìm tiêu đề PE hợp lệ đầu tiên.
+
+>**CẢNH BÁO**<br>
+Rootkit có thể dễ dàng bypass kỹ thuật phát hiện các luồng mồ côi (orphan threads) bằng cách sửa đổi các giá trị _ETHREAD.StartAddress để trỏ đến một driver đã biết. Trong bài thuyết trình của họ trên VB2008 (http://www.virusbtn.com/pdf/conference_slides/2008/Kasslin-Florio-VB2008.pdf), Kimmo Kasslin và Elia Floria đã ghi nhận rằng thế hệ thứ ba của Mebroot đã bắt đầu áp dụng những bản vá này để tăng tính bất dấu của rootkit.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

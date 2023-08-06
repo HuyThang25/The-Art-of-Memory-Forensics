@@ -43,7 +43,7 @@ Bộ xử lý (CPU) dựa vào bộ điều khiển bộ nhớ để quản lý 
 
 Ngoài tác động rõ ràng về hiệu suất hệ thống, DMA còn có những tác động quan trọng đối với pháp y số bộ nhớ. Nó cung cấp một cơ chế để truy cập trực tiếp nội dung của bộ nhớ vật lý từ một thiết bị ngoại vi mà không liên quan đến phần mềm không đáng tin cậy đang chạy trên máy. Ví dụ, bus PCI hỗ trợ các thiết bị hoạt động như người chủ của bus, có nghĩa là chúng có thể yêu cầu kiểm soát bus để khởi chạy giao dịch. Do đó, một thiết bị PCI với chức năng chủ bus và hỗ trợ DMA có thể truy cập vào bộ nhớ hệ thống mà không liên quan đến CPU.
 
-Một ví dụ khác là giao diện IEEE 1394, thường được gọi là Firewire. Chip điều khiển máy chủ IEEE 1394 cung cấp một bus mở rộng tuân theo ngang hàng dành cho việc kết nối các thiết bị ngoại vi tốc độ cao với máy tính cá nhân. Mặc dù giao diện IEEE 1394 thường chỉ có sẵn một cách tự nhiên trên các hệ thống cao cấp hơn, bạn có thể thêm giao diện này vào cả
+Một ví dụ khác là giao diện IEEE 1394, thường được gọi là Firewire. Chip điều khiển máy chủ IEEE 1394 cung cấp một bus mở rộng tuân theo ngang hàng dành cho việc kết nối các thiết bị ngoại vi tốc độ cao với máy tính cá nhân. Mặc dù giao diện IEEE 1394 thường chỉ có sẵn một cách tự nhiên trên các hệ thống cao cấp hơn, bạn có thể thêm giao diện này vào cả máy tính để bàn và máy tính xách tay bằng thẻ mở rộng.
 
 ### Volatile Memory (RAM)
 

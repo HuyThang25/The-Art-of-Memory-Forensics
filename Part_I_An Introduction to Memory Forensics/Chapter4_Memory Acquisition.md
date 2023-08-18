@@ -160,7 +160,7 @@ Dưới đây là danh sách các công cụ phổ biến để thu thập bộ 
 
 - AccessData FTK Imager: Công cụ này hỗ trợ thu thập nhiều loại dữ liệu, bao gồm RAM. AccessData cũng bán một bộ dụng cụ USB phản ứng trực tiếp được cấu hình sẵn để thu thập bộ nhớ vật lý cùng với nhật ký trò chuyện, kết nối mạng và các thành phần khác.
 
-- EnCase/WinEn: Công cụ thu thập từ Guidance Software có thể sao chép bộ nhớ theo định dạng nén và ghi lại siêu dữ liệu trong tiêu đề (như tên trường hợp, nhà phân tích, v.v.). Phiên bản Enterprise của EnCase sử dụng mã tương tự trong tác nhân của nó cho phép truy xét từ xa của hệ thống hoạt động (xem http://volatility-labs .blogspot.com/2013/10/sampling-ram-across-encase-enterprise.html).
+- EnCase/WinEn: Công cụ thu thập từ Guidance Software có thể sao chép bộ nhớ theo định dạng nén và ghi lại siêu dữ liệu trong tiêu đề (như tên trường hợp, nhà phân tích, v.v.). Phiên bản Enterprise của EnCase sử dụng mã tương tự trong tác nhân của nó cho phép truy xét từ xa của hệ thống hoạt động (xem http://volatility-labs.blogspot.com/2013/10/sampling-ram-across-encase-enterprise.html).
 
 - Belkasoft Live RAM Capturer: Một tiện ích quảng cáo khả năng thu thập bộ nhớ ngay cả khi có các cơ chế chống gỡ lỗi và chống ghi vào. Nó hỗ trợ tất cả các phiên bản Windows chính và 64 bit và có thể chạy từ một USB thumb drive.
 

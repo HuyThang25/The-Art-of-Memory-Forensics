@@ -172,7 +172,7 @@ Dưới đây là danh sách các công cụ phổ biến để thu thập bộ 
 
 ### Memory Acquisition with KnTDD
 
-KnTDD là một thành phần của gói KnTTools có sẵn từ GMG Systems, Inc. (http://www.gmgsystemsinc.com/knttools). Một phiên bản trước của phần mềm này đã giành giải thưởng Forensics Challenge (Thách thức Pháp y Kỹ thuật số) của Hội nghị Nghiên cứu Pháp y Kỹ thuật số DFRWS năm 2005 (http://www .dfrws.org/2005/challenge/kntlist.shtml) và sau đó đã được coi là một trong những gói phần mềm thu thập và phân tích bộ nhớ đáng tin cậy, tích hợp đầy đủ tính năng và có tài liệu tốt nhất. KnTTools có sẵn trong các phiên bản Basic và Enterprise. Dưới đây là các điểm nổi bật trong phiên bản Basic, được diễn đạt theo cách riêng:
+KnTDD là một thành phần của gói KnTTools có sẵn từ GMG Systems, Inc. (http://www.gmgsystemsinc.com/knttools). Một phiên bản trước của phần mềm này đã giành giải thưởng Forensics Challenge (Thách thức Pháp y Kỹ thuật số) của Hội nghị Nghiên cứu Pháp y Kỹ thuật số DFRWS năm 2005 (http://www.dfrws.org/2005/challenge/kntlist.shtml) và sau đó đã được coi là một trong những gói phần mềm thu thập và phân tích bộ nhớ đáng tin cậy, tích hợp đầy đủ tính năng và có tài liệu tốt nhất. KnTTools có sẵn trong các phiên bản Basic và Enterprise. Dưới đây là các điểm nổi bật trong phiên bản Basic, được diễn đạt theo cách riêng:
 
 - Thu thập bộ nhớ vật lý (bộ nhớ chính của máy tính) từ các hệ thống chạy hầu hết các phiên bản Windows từ XP Service Pack 3 đến Windows 8.1 và Server 2012 R2 (xem trang web để biết danh sách chính xác).
 

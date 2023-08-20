@@ -41,16 +41,13 @@ Khả năng xác định tiêu đề tùy chọn nào có sẵn (và nếu có, 
 
 ![](https://github.com/HuyThang25/Image/blob/main/Screenshot%202023-07-28%20141628.png)
 
->Key Points<br>
-Note the following key points:<br>
->-	 PointerCount: Contains the total number of pointers to the object, including kernelmode references.
->-	 HandleCount: Contains the number of open handles to the object.
->-	 TypeIndex: This value tells you what type of object you’re dealing with (e.g., process, thread, file).
->-	 InfoMask: This value tells you which of the optional headers, if any, are present.
->-	 SecurityDescriptor: Stores information on the security restrictions for the object,
-such as which users can access it for reading, writing, deleting, and so on.
->-	 Body: This member is just a placeholder that represents the start of the structure
-contained within the object.
+>Lưu ý các điểm quan trọng sau đây:
+>- PointerCount: Chứa tổng số con trỏ đến đối tượng, bao gồm cả các tham chiếu ở chế độ kernel.
+>- HandleCount: Chứa số lượng handles mở đến đối tượng.
+>- TypeIndex: Giá trị này cho bạn biết bạn đang làm việc với loại đối tượng gì (ví dụ, quy trình, luồng, tập tin).
+>- InfoMask: Giá trị này cho bạn biết các tiêu đề tùy chọn, nếu có, có hiện diện hay không.
+>- SecurityDescriptor: Lưu trữ thông tin về các hạn chế bảo mật cho đối tượng, chẳng hạn như người dùng nào có thể truy cập nó để đọc, viết, xóa và vân vân.
+>- Body: Thành viên này chỉ là một bộ giữ chỗ đại diện cho phần bắt đầu của cấu trúc chứa trong đối tượng.
 
 #### Optional Headers
 

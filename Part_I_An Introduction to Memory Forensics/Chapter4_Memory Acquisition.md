@@ -539,7 +539,7 @@ system: MS Windows registry file, NT/2000 or above
 software: MS Windows registry file, NT/2000 or above
 ```
 
-Sau khi bạn trích xuất các tệp hive thích hợp, bạn có thể phân tích chúng bằng một trình phân tích registry ngoại tuyến. Trong trường hợp này, chúng ta sử dụng reglookup (một công cụ mã nguồn mở từ: http://projects .sentinelchicken.org/reglookup). Cụ thể, bạn có thể tìm giá trị ProductName trong hive SOFTWARE và giá trị PROCESSOR_ARCHITECTURE trong hive SYSTEM, như được thể hiện ở đây:
+Sau khi bạn trích xuất các tệp hive thích hợp, bạn có thể phân tích chúng bằng một trình phân tích registry ngoại tuyến. Trong trường hợp này, chúng ta sử dụng reglookup (một công cụ mã nguồn mở từ: http://projects.sentinelchicken.org/reglookup). Cụ thể, bạn có thể tìm giá trị ProductName trong hive SOFTWARE và giá trị PROCESSOR_ARCHITECTURE trong hive SYSTEM, như được thể hiện ở đây:
 
 ```
 $ reglookup -p "Microsoft/Windows NT/CurrentVersion"
